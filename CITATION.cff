@@ -1,0 +1,31 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it using the metadata from this file."
+title: "archimono - A Python Toolkit for Systematic Structure Enumeration of 2D Monolayer Networks on Archimedean Tilings"
+type: software
+authors:
+  - given-names: Viejay
+    family-names: Ordillo
+    affiliation: Nara Institute of Science and Technology
+  - given-names: Virgil
+    family-names: Castillo
+    affiliation: Nara Institute of Science and Technology
+  - given-names: Tomiya
+    family-names: Yamamoto
+    affiliation: Nara Institute of Science and Technology
+  - given-names: Yosuke
+    family-names: Harashima
+    affiliation: Nara Institute of Science and Technology
+  - given-names: Shogo
+    family-names: Takasuka
+    affiliation: Nara Institute of Science and Technology
+  - given-names: Tomoaki
+    family-names: Takayama
+    affiliation: Nara Institute of Science and Technology
+  - given-names: Mikiya
+    family-names: Fujii
+    affiliation: Nara Institute of Science and Technology
+version: 0.1.0
+date-released: "2026-06-20"
+license: MIT
+repository-code: "https://github.com/archimono/archimono"
+url: "https://archimono.github.io/archimono/"

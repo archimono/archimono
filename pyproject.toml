@@ -1,0 +1,77 @@
+[build-system]
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "archimono"
+version = "0.1.0"
+description = "Systematic structure enumeration of 2D monolayer networks on Archimedean tilings"
+requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
+dependencies = [
+    "spglib>=2.1",
+    "networkx>=3.2",
+    "numpy>=1.26",
+    "ase>=3.22",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+# icet backend for IcetEnumerator. The default orderly backend
+# (enumeration.get()) is icet-free, so icet is opt-in.
+icet = [
+    "icet>=2.1",
+]
+viz = [
+    "matplotlib>=3.7",
+]
+accel = [
+    "numba>=0.60",
+]
+dev = [
+    "icet>=2.1",
+    "ruff>=0.4",
+    "mypy>=1.9",
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+    "types-networkx>=3.4",
+    "hypothesis>=6.100",
+]
+docs = [
+    "sphinx>=7.0",
+    "furo>=2024.1",
+]
+
+[project.urls]
+Homepage = "https://github.com/archimono/archimono"
+Repository = "https://github.com/archimono/archimono"
+Documentation = "https://archimono.github.io/archimono/"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["archimono*"]
+
+[tool.ruff]
+src = ["src"]
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "ANN"]
+
+[tool.mypy]
+strict = true
+mypy_path = "src"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+filterwarnings = [
+    "ignore::DeprecationWarning:spglib",
+]
+addopts = "-m 'not heavy'"
+markers = [
+    "fast: inner dev loop (< 10s total)",
+    "contract: pre-commit gate (< 3 min)",
+    "heavy: full robustness, CI or manual (< 10 min)",
+]
