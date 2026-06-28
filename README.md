@@ -23,7 +23,7 @@ flowchart LR
     D["BipartiteAssigner<br/>assign(tiling, n_b)"]
     E["MAX-CUT solver<br/>Hadlock · Bruteforce · Frontier<br/>Greedy · Annealing"]
     F["AssignmentResult<br/>cut_value · labels"]
-    G["IcetEnumerator / OrderlyEnumerator<br/>enumerate()"]
+    G["OrderlyEnumerator / IcetEnumerator<br/>enumerate()"]
     H["📦 Inequivalent structures<br/>ready for DFT"]
 
     A --> B --> C
@@ -58,7 +58,7 @@ pip install -e ".[dev]"
 
 ```python
 from archimono.tilings import registry
-from archimono.assignment import BruteforceSolver, IcetEnumerator
+from archimono.assignment import BruteforceSolver, enumeration
 
 tiling = registry.get("kagome")              # 3.6.3.6
 graph  = tiling.graph(supercell=(2, 2))      # 12-node PBC graph
@@ -67,8 +67,10 @@ graph  = tiling.graph(supercell=(2, 2))      # 12-node PBC graph
 result = BruteforceSolver().solve(graph, ["B", "N"], n_b=6)
 # result.cut_value == 16.0, result.n_frustrated == 8
 
-# Enumerate near-optimal symmetry-inequivalent structures
-configs = IcetEnumerator().enumerate(
+# Enumerate near-optimal symmetry-inequivalent structures.
+# enumeration.get() returns the default orderly backend (icet-free);
+# enumeration.get("icet") selects the icet backend instead.
+configs = enumeration.get().enumerate(
     tiling, n_b=6, supercell=(2, 2), min_cut=result.cut_value - 2
 )
 # len(configs) == 15

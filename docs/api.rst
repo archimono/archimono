@@ -39,10 +39,10 @@ Assignment — solvers
 Assignment — enumeration
 ------------------------
 
-.. automodule:: archimono.assignment.enumeration.icet
+.. automodule:: archimono.assignment.enumeration.orderly
    :members:
 
-.. automodule:: archimono.assignment.enumeration.orderly
+.. automodule:: archimono.assignment.enumeration.icet
    :members:
 
 .. automodule:: archimono.assignment.enumeration.burnside
