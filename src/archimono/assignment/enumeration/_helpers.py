@@ -36,14 +36,6 @@ def _supercell_lattice_vectors(
     ``nb*a2``.  For a 2×2 integer matrix ``S`` they follow the same convention
     as :meth:`~archimono.tilings.base.Tiling.graph`: ``A_i = sum_j S_ji a_j``,
     i.e. column ``i`` of ``S`` gives the coefficients of ``A_i``.
-
-    Args:
-        supercell: Either an ``(na, nb)`` tuple or a 2×2 integer matrix.
-        a1: First primitive lattice vector (2D).
-        a2: Second primitive lattice vector (2D).
-
-    Returns:
-        The pair of 2D Cartesian supercell lattice vectors.
     """
     arr = np.asarray(supercell)
     if arr.ndim == 2:
@@ -76,9 +68,6 @@ def _tiling_to_atoms(
         supercell: Either an ``(na, nb)`` tuple or a 2×2 integer matrix
             (sheared) supercell, matching :meth:`Tiling.graph`.
         vacuum: Out-of-plane cell height in Å.
-
-    Returns:
-        An ASE :class:`~ase.Atoms` object with one atom per graph node.
     """
     a1_2d = np.asarray(tiling.lattice_vectors[0], dtype=np.float64)
     a2_2d = np.asarray(tiling.lattice_vectors[1], dtype=np.float64)

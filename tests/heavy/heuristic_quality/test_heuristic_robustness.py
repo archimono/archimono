@@ -12,12 +12,15 @@ from archimono.assignment import AnnealingSolver, GreedySolver
 from archimono.assignment.solvers.frontier_dp import FrontierExactSolver
 from archimono.tilings import registry
 
-# (tiling_key, supercell, n_b)
+# (tiling_key, supercell, n_b). triangular, kagome, elongated_triangular,
+# and snub_square alias at their previous sizes here (edge instances collapse
+# under PBC -- see Tiling._graph_matrix); bumped to their smallest supported
+# supercells.
 _FRUSTRATED_CASES = [
-    ("triangular", (2, 2), 2),
-    ("kagome", (1, 1), 1),
-    ("elongated_triangular", (2, 1), 4),
-    ("snub_square", (1, 1), 2),
+    ("triangular", (3, 3), 2),
+    ("kagome", (2, 2), 1),
+    ("elongated_triangular", (3, 1), 4),
+    ("snub_square", (2, 2), 2),
     ("truncated_hexagonal", (1, 1), 3),
     ("rhombitrihexagonal", (1, 1), 3),
     ("snub_hexagonal", (1, 1), 3),
@@ -91,7 +94,6 @@ class TestHeuristicUpperBound:
     def test_cut_value_bounded(
         self, key: str, supercell: tuple[int, int], n_b: int
     ) -> None:
-        """Cut value <= |E| for both heuristics."""
         tiling = registry.get(key)
         graph = tiling.graph(supercell=supercell)
         total_edges = graph.number_of_edges()

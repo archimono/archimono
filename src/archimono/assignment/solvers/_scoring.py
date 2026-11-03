@@ -10,14 +10,7 @@ from archimono.assignment.solvers import _validation, base
 
 
 def weighted_edge_list(graph: nx.Graph[int]) -> list[base.AssignmentEdge]:
-    """Return graph edges as `(i, j, weight)` triples.
-
-    Args:
-        graph: Graph whose edges may include optional `weight` attributes.
-
-    Returns:
-        A list of weighted edge triples with integer node indices.
-    """
+    """Return graph edges as `(i, j, weight)` triples with integer node indices."""
     edges: list[base.AssignmentEdge] = []
     for i, j, data in graph.edges(data=True):
         weight = float(data.get("weight", 1.0))
@@ -25,19 +18,21 @@ def weighted_edge_list(graph: nx.Graph[int]) -> list[base.AssignmentEdge]:
     return edges
 
 
+def count_cut_edges(graph: nx.Graph[int], labels: Sequence[int]) -> int:
+    """Count unit-weight cut edges (endpoints with different labels)."""
+    return sum(1 for u, v in graph.edges() if labels[int(u)] != labels[int(v)])
+
+
+def count_frustrated_edges(graph: nx.Graph[int], labels: Sequence[int]) -> int:
+    """Count frustrated edges (endpoints with identical labels)."""
+    return sum(1 for u, v in graph.edges() if labels[int(u)] == labels[int(v)])
+
+
 def maxcut_value(
     labels: Sequence[int],
     edges: Sequence[base.AssignmentEdge],
 ) -> float:
     """Return the weighted cut value for a binary assignment.
-
-    Args:
-        labels: Node labels encoded as `0` and `1`, with opposite labels
-            representing opposite sides of the cut.
-        edges: Weighted graph edges as `(i, j, weight)` triples.
-
-    Returns:
-        The weighted cut value induced by `labels`.
 
     Raises:
         ValueError: If `labels` contains values other than `0` and `1`.

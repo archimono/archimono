@@ -1,40 +1,46 @@
-"""Regression test for the verify.py geometry bond-length check (audit H1).
-
-Before the fix, ``verify.py`` built each tiling with the default
-``bond_length=1.0`` while comparing edge lengths against the physical Å values
-in ``_EXPECTED``, so every tiling failed the bond-length check and the script
-exited 1. This pins that, built with the expected bond length, the checks pass.
-"""
+"""Regression test for the package geometry workflow edge-length check."""
 
 from __future__ import annotations
 
-import importlib.util
-import pathlib
-import types
+import io
+from pathlib import Path
 
 import pytest
 
+from archimono import verification
 from archimono.tilings import registry
+from archimono.tilings.base import Tiling
+
+_KEY = "3.6.3.6"  # kagome
 
 
-def _load_verify() -> types.ModuleType:
-    """Load scripts/verify.py without requiring scripts to be a package."""
-    script = pathlib.Path(__file__).parents[3] / "scripts" / "verify.py"
-    spec = importlib.util.spec_from_file_location("verify_script_pass", script)
-    assert spec is not None
-    assert spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+def test_geometry_workflow_uses_expected_edge_length(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Geometry mode passes the physical edge length to every registry lookup."""
+    expected = verification._EXPECTED[_KEY]
+    expected_edge_length = expected[3]
+    monkeypatch.setattr(verification, "_EXPECTED", {_KEY: expected})
 
+    requests: list[tuple[str, float]] = []
+    real_get = registry.get
 
-@pytest.mark.parametrize("key", ["3.6.3.6", "6³"])
-def test_geometry_checks_pass_with_expected_bond_length(key: str) -> None:
-    """Built with ``_EXPECTED`` bond length, geometry checks report no errors."""
-    verify = _load_verify()
-    bond = verify._EXPECTED[key][3]
-    tiling = registry.get(key, bond_length=bond)
-    g_vis = tiling.graph(verify._VIS_SC[key])
-    g_bp = tiling.graph(verify._BPCHECK_SC[key])
-    errors, _coord = verify._run_geometry_checks(key, tiling, g_vis, g_bp)
-    assert errors == [], f"{key}: unexpected geometry errors {errors}"
+    def record_get(vertex_config: str, edge_length: float = 1.0) -> Tiling:
+        requests.append((vertex_config, edge_length))
+        return real_get(vertex_config, edge_length)
+
+    monkeypatch.setattr(registry, "get", record_get)
+    output = io.StringIO()
+    result = verification.run_verification(
+        verification.VerificationConfig(
+            mode="geometry",
+            out_dir=tmp_path,
+            output=output,
+        )
+    )
+
+    assert requests == [(_KEY, expected_edge_length)] * 2
+    assert result.ok is True
+    assert result.geometry_ok is True
+    assert (tmp_path / "overview_geometry.png").is_file()

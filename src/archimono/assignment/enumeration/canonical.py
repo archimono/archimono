@@ -14,11 +14,11 @@ permutation is never informative (its image always equals the input), so
 :func:`prepare_active` strips it from the group before incremental use.
 
 References:
-    McKay, B. D. (1998).
-        Isomorph-free exhaustive generation.
-        *Journal of Algorithms*, 26(2), 306–324.
-        https://doi.org/10.1006/jagm.1997.0898
-        §3: canonical deletion and prefix-based pruning.
+    Read, R. C. (1978).
+        Every one a winner or how to avoid isomorphism search when
+        cataloguing combinatorial configurations.
+        *Annals of Discrete Mathematics*, 2, 107–120.
+        https://doi.org/10.1016/S0167-5060(08)70325-X
 """
 
 from __future__ import annotations
@@ -38,9 +38,6 @@ def canonical_form(
         assignment: A binary tuple of length *n*
             (0 = ``species[0]``, 1 = ``species[1]``).
         group: Symmetry group as a list of permutation tuples.
-
-    Returns:
-        The canonical (lex-minimum) representative of the orbit.
     """
     canon = assignment
     for perm in group:
@@ -65,9 +62,6 @@ def prepare_active(
         group: Symmetry group as a list of permutation tuples.  All
             tuples must have the same length.  An empty list returns
             an empty active set.
-
-    Returns:
-        All non-identity elements of *group*.
     """
     if not group:
         return []
@@ -113,10 +107,6 @@ def filter_active(
         ``(new_active, is_canonical)`` where *new_active* is the
         surviving active set and *is_canonical* is ``False`` if any
         element proves the current prefix is not lex-minimum.
-
-    References:
-        McKay (1998), §3: the active-set refinement is the
-        incremental form of the canonical-deletion test.
     """
     new_active: list[tuple[int, ...]] = []
 

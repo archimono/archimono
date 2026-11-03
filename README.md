@@ -97,20 +97,19 @@ sphinx-build -b html docs docs/_build/html
 ## Development
 
 ```bash
-ruff check src/      # lint
-mypy src/            # type-check
-pytest               # tests
+ruff check src/ scripts/ tests/
+mypy src/
+pytest
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) to get started, and
-[CLAUDE.md](CLAUDE.md) for the full dev contract (coding style, docstring
-policy, citation requirements).
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the test tiers, code style, and
+pull request checks. LLM agents also follow [CLAUDE.md](CLAUDE.md).
 
 ## Citation
 
-If you use archimono in your research, please cite it. Machine-readable
-metadata is in [`CITATION.cff`](CITATION.cff) (use GitHub's "Cite this
-repository" button), or cite as:
+If you use archimono in your research, please cite it using the reference
+below. GitHub's "Cite this repository" button provides the same information
+from [`CITATION.cff`](CITATION.cff).
 
 > Ordillo, V., Castillo, V., Yamamoto, T., Harashima, Y., Takasuka, S.,
 > Takayama, T., & Fujii, M. (2026). *archimono — A Python Toolkit for

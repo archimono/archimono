@@ -48,25 +48,11 @@ class BruteforceSolver(base.AssignmentSolver):
     ) -> base.TargetComposition:
         """Return the fixed composition target, defaulting ``n_b`` to ``n // 2``.
 
-        Args:
-            n_nodes: Total number of graph nodes.
-            n_b: Requested count of ``1`` labels, or ``None`` to default to
-                ``n_nodes // 2``.
-
-        Returns:
-            A ``(n_a, n_b)`` pair.
-
         Raises:
             ValueError: If ``n_b`` is not a valid integer in the range
                 ``0 .. n_nodes``.
         """
-        if n_b is None:
-            n_b = n_nodes // 2
-        if not isinstance(n_b, int) or isinstance(n_b, bool):
-            raise ValueError("n_b must be an integer count of 1 labels.")
-        if n_b < 0 or n_b > n_nodes:
-            raise ValueError(f"n_b must satisfy 0 <= n_b <= {n_nodes}.")
-        return (n_nodes - n_b, n_b)
+        return _validation.resolve_fixed_composition(n_nodes, n_b)
 
     def solve(
         self,
@@ -118,9 +104,7 @@ class BruteforceSolver(base.AssignmentSolver):
             target_composition=target_composition,
         )
 
-        n_frustrated = sum(
-            1 for u, v in graph.edges() if labels[int(u)] == labels[int(v)]
-        )
+        n_frustrated = _scoring.count_frustrated_edges(graph, labels)
         return base.AssignmentResult(
             labels=labels,
             objective_value=cut_value,

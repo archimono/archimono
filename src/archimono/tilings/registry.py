@@ -44,7 +44,7 @@ def register(*keys: str) -> Callable[[type[Tiling]], type[Tiling]]:
     return decorator
 
 
-def get(vertex_config: str, bond_length: float = 1.0) -> Tiling:
+def get(vertex_config: str, edge_length: float = 1.0) -> Tiling:
     """Return a :class:`Tiling` instance for the given vertex-configuration string.
 
     Triggers lazy import of all tiling submodules on first call so that
@@ -53,15 +53,15 @@ def get(vertex_config: str, bond_length: float = 1.0) -> Tiling:
     Args:
         vertex_config: A vertex-configuration string such as ``'3.6.3.6'``
             or ``'6^3'``.
-        bond_length: Edge length scale passed to the tiling constructor.
-            Default ``1.0`` (dimensionless unit bond).
+        edge_length: Edge length scale passed to the tiling constructor.
+            Default ``1.0`` (dimensionless unit edge).
 
     Returns:
         A freshly constructed :class:`Tiling` instance.
 
     Raises:
         KeyError: If *vertex_config* is not recognised.
-        ValueError: If *bond_length* is not positive.
+        ValueError: If *edge_length* is not positive.
     """
     _ensure_loaded()
     if vertex_config not in _REGISTRY:
@@ -70,7 +70,7 @@ def get(vertex_config: str, bond_length: float = 1.0) -> Tiling:
             f"Unknown vertex config '{vertex_config}'. "
             f"Available: {available}"
         )
-    return _REGISTRY[vertex_config](bond_length=bond_length)
+    return _REGISTRY[vertex_config](edge_length=edge_length)
 
 
 def available() -> list[str]:

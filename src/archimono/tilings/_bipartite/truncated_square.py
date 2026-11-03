@@ -3,7 +3,7 @@
 Each vertex borders one square and two octagons.
 Primitive cell: 4 vertices.  Coordination number: 3.  Bipartite.
 Lattice: square (a = b, γ = 90°).
-Bond length is parameterised via ``Tiling.bond_length`` (default 1.0).
+Edge length is parameterised via ``Tiling.edge_length`` (default 1.0).
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ class TruncatedSquareTiling(Tiling):
     Note:
         PBC parity constraint — both supercell dimensions (na, nb) must be
         **even**.  Odd dimensions fold a cross-cell edge connecting two
-        same-sublattice vertices into the same cell, producing an A–A bond that
+        same-sublattice vertices into the same cell, producing an A–A edge that
         destroys bipartiteness.  ``Tiling.graph()`` raises ``ValueError`` for
         odd-dimension supercells.  See ``docs/reference/tilings.md``, §PBC.
     """
@@ -35,8 +35,8 @@ class TruncatedSquareTiling(Tiling):
 
     @property
     def lattice_vectors(self) -> NDArray[np.float64]:
-        # Lattice parameter: a = bond * (1 + √2)
-        a = self.bond_length * (1.0 + np.sqrt(2.0))
+        # Lattice parameter: a = edge * (1 + √2)
+        a = self.edge_length * (1.0 + np.sqrt(2.0))
         return np.array(
             [
                 [a, 0.0],
@@ -51,10 +51,10 @@ class TruncatedSquareTiling(Tiling):
         # We place the square perfectly in the center of the unit cell (0.5, 0.5).
         # It is naturally rotated by 45 degrees to bridge the octagons
         # located at the cell corners.
-        a = self.bond_length * (1.0 + np.sqrt(2.0))
+        a = self.edge_length * (1.0 + np.sqrt(2.0))
 
         # Calculate the fractional distance from the center to the square's corners
-        d = self.bond_length / (2.0 * a)
+        d = self.edge_length / (2.0 * a)
 
         return np.array(
             [
@@ -74,7 +74,7 @@ class TruncatedSquareTiling(Tiling):
 
         edges: list[tuple[int, int, int, int]] = []
         seen: set[tuple[int, int, int, int]] = set()
-        tol = 0.15 * self.bond_length
+        tol = 0.15 * self.edge_length
 
         # Dynamically discover all 6 undirected edges per primitive cell
         # to perfectly achieve the coordination number of 3 for all 4 vertices.
@@ -85,7 +85,7 @@ class TruncatedSquareTiling(Tiling):
                         continue
                     shifted = frac[j] + np.array([da, db])
                     dist = float(np.linalg.norm((shifted - frac[i]) @ L))
-                    if abs(dist - self.bond_length) < tol:
+                    if abs(dist - self.edge_length) < tol:
                         key = (i, j, da, db)
                         rev = (j, i, -da, -db)
                         if key not in seen and rev not in seen:

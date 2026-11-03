@@ -39,9 +39,9 @@ from archimono.tilings.base import Tiling
 COLOR_B: str = "#4C72B0"
 #: Orange — N-species atom colour.
 COLOR_N: str = "#DD8452"
-#: Green — heterogeneous B–N bond (cut edge).
+#: Green — heterogeneous B–N edge (cut edge).
 COLOR_CUT: str = "#2CA02C"
-#: Red — frustrated homo bond (B–B or N–N).
+#: Red — frustrated homo edge (B–B or N–N).
 COLOR_FRUST: str = "#D62728"
 #: Light blue — ghost B atom in periodic image cells.
 COLOR_GHOST_B: str = "#A8BFD9"
@@ -90,19 +90,12 @@ def iter_pbc_edges(
     tiling: Tiling,
     supercell: tuple[int, int],
 ) -> list[tuple[int, int, int, int]]:
-    """Return de-duplicated ``(u, v, img_a, img_b)`` bond records.
+    """Return de-duplicated ``(u, v, img_a, img_b)`` edge records.
 
     ``img_a`` and ``img_b`` are the integer supercell-image offsets for
-    endpoint *v* relative to *u* in the infinite lattice.  Interior bonds have
-    ``img_a = img_b = 0``; bonds that wrap the supercell boundary have
-    non-zero offsets.  Each bond appears exactly once.
-
-    Args:
-        tiling: The tiling whose primitive-cell edge list is iterated.
-        supercell: ``(na, nb)`` supercell dimensions.
-
-    Returns:
-        List of ``(u, v, img_a, img_b)`` tuples, one per unique bond.
+    endpoint *v* relative to *u* in the infinite lattice.  Interior edges have
+    ``img_a = img_b = 0``; edges that wrap the supercell boundary have
+    non-zero offsets.  Each edge appears exactly once.
     """
     na, nb = supercell
     n_v = len(tiling.vertices)
@@ -141,8 +134,8 @@ def draw_tiling_assignment(
 ) -> None:
     """Draw a tiling assignment onto *ax* using the canonical project style.
 
-    Renders ghost atoms in the eight surrounding image cells, bonds as
-    PBC-correct split stubs (each wrapping bond is drawn as two half-stubs,
+    Renders ghost atoms in the eight surrounding image cells, edges as
+    PBC-correct split stubs (each wrapping edge is drawn as two half-stubs,
     one leaving from each side of the cell boundary), central-cell atoms
     coloured by species, and a clean parallelogram supercell outline.
 
@@ -156,7 +149,7 @@ def draw_tiling_assignment(
         labels: Per-site species labels, one entry per site in supercell order.
             Values must be ``0`` (B) or ``1`` (N).
         node_size: Marker area in points² (passed to ``ax.scatter``).
-        edge_width: Bond line width in points.
+        edge_width: Edge line width in points.
         ghost: If ``True``, draw faded atoms in the eight surrounding image
             cells to show periodic context.
     """
@@ -213,7 +206,7 @@ def draw_tiling_assignment(
                 edgecolors="white", linewidths=0.4, alpha=0.50, zorder=2,
             )
 
-    # ── bonds: PBC split-stub rendering ──────────────────────────────────────
+    # ── edges: PBC split-stub rendering ──────────────────────────────────────
     for u, v, img_a, img_b in iter_pbc_edges(tiling, supercell):
         pu = pos[u]
         pv = pos[v] + img_a * super_a + img_b * super_b
@@ -262,12 +255,8 @@ def legend_handles(
 ) -> list[Line2D]:
     """Return the four standard ``Line2D`` legend handles.
 
-    Args:
-        species_b: Label string for the B-like species.
-        species_n: Label string for the N-like species.
-
     Returns:
-        List of four handles: B atom, N atom, B–N cut bond, frustrated bond.
+        List of four handles: B atom, N atom, B–N cut edge, frustrated edge.
     """
     return [
         Line2D(

@@ -3,7 +3,7 @@
 Each vertex borders three hexagons.
 Primitive cell: 2 vertices.  Coordination number: 3.  Bipartite.
 Lattice: hexagonal (a = b, γ = 120°).
-Bond length is parameterised via ``Tiling.bond_length`` (default 1.0).
+Edge length is parameterised via ``Tiling.edge_length`` (default 1.0).
 """
 
 from __future__ import annotations
@@ -27,9 +27,9 @@ class HexagonalTiling(Tiling):
 
     @property
     def lattice_vectors(self) -> NDArray[np.float64]:
-        # a1 = a(1, 0),  a2 = a(-1/2, √3/2)  with a = bond * √3
+        # a1 = a(1, 0),  a2 = a(-1/2, √3/2)  with a = edge * √3
         # This forms the standard 120° lattice
-        a = self.bond_length * np.sqrt(3.0)
+        a = self.edge_length * np.sqrt(3.0)
         return np.array(
             [
                 [a, 0.0],
@@ -40,7 +40,7 @@ class HexagonalTiling(Tiling):
 
     @property
     def vertices(self) -> NDArray[np.float64]:
-        # Two atoms (A and B sublattice) in fractional coordinates.
+        # Two vertices (A and B sublattice) in fractional coordinates.
         # For a 120° lattice, the correct placement is (1/3, 2/3) and (2/3, 1/3)
         return np.array(
             [[1.0 / 3.0, 2.0 / 3.0], [2.0 / 3.0, 1.0 / 3.0]],
@@ -55,7 +55,7 @@ class HexagonalTiling(Tiling):
 
         edges: list[tuple[int, int, int, int]] = []
         seen: set[tuple[int, int, int, int]] = set()
-        tol = 0.15 * self.bond_length
+        tol = 0.15 * self.edge_length
 
         # Dynamically discover all 3 connections per vertex to satisfy
         # the honeycomb structure.
@@ -66,7 +66,7 @@ class HexagonalTiling(Tiling):
                         continue
                     shifted = frac[j] + np.array([da, db])
                     dist = float(np.linalg.norm((shifted - frac[i]) @ L))
-                    if abs(dist - self.bond_length) < tol:
+                    if abs(dist - self.edge_length) < tol:
                         key = (i, j, da, db)
                         rev = (j, i, -da, -db)
                         if key not in seen and rev not in seen:

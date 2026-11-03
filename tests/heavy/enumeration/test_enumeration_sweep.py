@@ -1,4 +1,4 @@
-"""Heavy enumeration tests: all backends x all tilings at 2x2.
+"""Heavy enumeration tests: all backends x all tilings at their supported size.
 
 Verifies backend agreement across the full tiling set.
 """
@@ -16,16 +16,28 @@ from archimono.tilings import registry
 
 ALL_TILING_KEYS = sorted(registry.available())
 
-# Build sweep cases: all tilings at 2x2, choosing n_b to keep tractable.
+# triangular and elongated_triangular alias at (2,2) (edge instances collapse
+# under PBC -- see Tiling._graph_matrix); their smallest supported supercells
+# are (3,3) and (3,1) respectively. Every other tiling is unaffected at
+# (2,2). Keyed by vertex_config since ALL_TILING_KEYS includes every
+# registered alias (including vertex-config strings) for the same tiling.
+_SUPERCELL_BY_VERTEX_CONFIG: dict[str, tuple[int, int]] = {
+    "3⁶": (3, 3),  # triangular
+    "3³.4²": (3, 1),  # elongated_triangular
+}
+
+# Build sweep cases: all tilings at their supported size, choosing n_b to
+# keep tractable.
 _SWEEP_CASES: list[tuple[str, tuple[int, int], int]] = []
 for _key in ALL_TILING_KEYS:
     _tiling = registry.get(_key)
-    _n = _tiling.n_vertices * 4
+    _supercell = _SUPERCELL_BY_VERTEX_CONFIG.get(_tiling.vertex_config, (2, 2))
+    _n = _tiling.n_vertices * _supercell[0] * _supercell[1]
     _n_b = _n // 2
     if comb(_n, _n_b) <= 5000:
-        _SWEEP_CASES.append((_key, (2, 2), _n_b))
+        _SWEEP_CASES.append((_key, _supercell, _n_b))
     else:
-        _SWEEP_CASES.append((_key, (2, 2), 2))
+        _SWEEP_CASES.append((_key, _supercell, 2))
 
 
 class TestAllBackendsAgree:
@@ -39,7 +51,6 @@ class TestAllBackendsAgree:
     def test_three_way_agreement(
         self, key: str, supercell: tuple[int, int], n_b: int
     ) -> None:
-        """All three enumeration backends agree."""
         tiling = registry.get(key)
         n = tiling.n_vertices * supercell[0] * supercell[1]
 

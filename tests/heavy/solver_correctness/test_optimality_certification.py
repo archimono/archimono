@@ -15,10 +15,14 @@ from archimono.assignment import BruteforceSolver
 from archimono.tilings import registry
 
 # Cases small enough for brute-force certification (C(n, n_b) <= 1000).
+# kagome, triangular, and snub_square alias at their previous sizes here
+# (edge instances collapse under PBC -- see Tiling._graph_matrix); bumped to
+# their smallest supported supercells. n_b is kept as-is (not rebalanced to
+# n//2) so C(n, n_b) stays within this file's budget.
 _CERTIFIABLE_CASES = [
-    ("kagome", (1, 1), 1),
-    ("triangular", (2, 2), 2),
-    ("snub_square", (1, 1), 2),
+    ("kagome", (2, 2), 1),
+    ("triangular", (3, 3), 2),
+    ("snub_square", (2, 2), 2),
     ("truncated_hexagonal", (1, 1), 3),
     ("rhombitrihexagonal", (1, 1), 3),
     ("kagome", (2, 2), 6),
@@ -49,7 +53,6 @@ class TestBruteForceConfirmsSolver:
     def test_solver_matches_brute_force(
         self, key: str, supercell: tuple[int, int], n_b: int
     ) -> None:
-        """BruteforceSolver cut_value == brute-force maximum."""
         tiling = registry.get(key)
         graph = tiling.graph(supercell=supercell)
 

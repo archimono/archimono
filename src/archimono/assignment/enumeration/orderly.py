@@ -14,7 +14,7 @@ stops as soon as that many representatives have been collected.
 
 References:
     Read, R. C. (1978).
-        Every one a winner; or, how to avoid isomorphism search when
+        Every one a winner or how to avoid isomorphism search when
         cataloguing combinatorial configurations.
         *Annals of Discrete Mathematics*, 2, 107–120.
         https://doi.org/10.1016/S0167-5060(08)70325-X
@@ -28,6 +28,7 @@ References:
 from __future__ import annotations
 
 import math
+from collections.abc import Iterator
 from typing import TYPE_CHECKING
 
 from ase import Atoms
@@ -37,7 +38,10 @@ from archimono.assignment.enumeration._helpers import (
     _tiling_to_atoms,
     assignment_to_atoms,
 )
-from archimono.assignment.enumeration.burnside import BurnsideCounter
+from archimono.assignment.enumeration.burnside import (
+    MAX_RAW_CONFIGURATIONS,
+    BurnsideCounter,
+)
 from archimono.assignment.enumeration.canonical import filter_active, prepare_active
 
 if TYPE_CHECKING:
@@ -92,7 +96,7 @@ class OrderlyEnumerator:
 
         Args:
             n: Total number of sites.
-            n_b: Number of label-1 atoms (= species[1]).  Must
+            n_b: Number of label-1 sites (= species[1]).  Must
                 satisfy ``0 <= n_b <= n``.
             group: Symmetry group as a list of permutation tuples of
                 length *n*.  Must contain the identity.
@@ -115,42 +119,56 @@ class OrderlyEnumerator:
         results: list[tuple[int, ...]] = []
         assignment: list[int] = []
 
-        def _backtrack(
-            pos: int,
-            ones_left: int,
-            zeros_left: int,
-            active: list[tuple[int, ...]],
-        ) -> None:
-            if pos == n:
-                if ones_left == 0:
-                    results.append(tuple(assignment))
-                    if len(results) == expected:
-                        raise _EarlyTermination
-                return
-
-            for value in (0, 1):
-                if value == 0 and zeros_left <= 0:
-                    continue
-                if value == 1 and ones_left <= 0:
-                    continue
-
-                new_active, is_canonical = filter_active(
-                    active, assignment, pos, value,
-                )
-                if not is_canonical:
-                    continue
-
-                assignment.append(value)
-                _backtrack(
-                    pos + 1,
-                    ones_left - value,
-                    zeros_left - (1 - value),
-                    new_active,
-                )
-                assignment.pop()
+        # Explicit-stack backtracking: recursion depth would equal n, which
+        # overflows the interpreter stack for ~1000-site supercells even when
+        # the pruned search space is tiny. Each frame owns the value appended
+        # by its parent; the root frame owns none.
+        _Frame = tuple[int, int, int, list[tuple[int, ...]], Iterator[int]]
 
         try:
-            _backtrack(0, n_b, n - n_b, initial_active)
+            if n == 0:
+                if n_b == 0:
+                    results.append(())
+            else:
+                stack: list[_Frame] = [
+                    (0, n_b, n - n_b, initial_active, iter((0, 1)))
+                ]
+                while stack:
+                    pos, ones_left, zeros_left, active, values = stack[-1]
+                    descended = False
+                    for value in values:
+                        if value == 0 and zeros_left <= 0:
+                            continue
+                        if value == 1 and ones_left <= 0:
+                            continue
+
+                        new_active, is_canonical = filter_active(
+                            active, assignment, pos, value,
+                        )
+                        if not is_canonical:
+                            continue
+
+                        assignment.append(value)
+                        if pos + 1 == n:
+                            if ones_left - value == 0:
+                                results.append(tuple(assignment))
+                                if len(results) == expected:
+                                    raise _EarlyTermination
+                            assignment.pop()
+                            continue
+                        stack.append((
+                            pos + 1,
+                            ones_left - value,
+                            zeros_left - (1 - value),
+                            new_active,
+                            iter((0, 1)),
+                        ))
+                        descended = True
+                        break
+                    if not descended:
+                        stack.pop()
+                        if stack:
+                            assignment.pop()
         except _EarlyTermination:
             pass
 
@@ -169,7 +187,7 @@ class OrderlyEnumerator:
 
         Args:
             tiling: The Archimedean tiling to enumerate on.
-            n_b: Number of label-1 atoms (= species[1]).  Must satisfy
+            n_b: Number of label-1 sites (= species[1]).  Must satisfy
                 ``1 <= n_b < n``.
             supercell: ``(na, nb)`` tuple or 2×2 integer matrix supercell
                 (matching :meth:`Tiling.graph`).
@@ -187,8 +205,8 @@ class OrderlyEnumerator:
 
         Raises:
             ValueError: If *supercell* produces a degenerate graph
-                (self-loop or PBC parity violation), if *n_b* is
-                out of range, or if the raw enumeration space
+                (self-loop, PBC parity violation, or edge aliasing), if
+                *n_b* is out of range, or if the raw enumeration space
                 C(n, n_b) exceeds 10 million without
                 ``override=True``.
         """
@@ -201,12 +219,11 @@ class OrderlyEnumerator:
                 f"n_b={n_b} out of valid range [1, {n - 1}] for n={n}."
             )
 
-        _MAX_RAW = 10_000_000
         n_choose_nb = math.comb(n, n_b)
-        if not override and n_choose_nb > _MAX_RAW:
+        if not override and n_choose_nb > MAX_RAW_CONFIGURATIONS:
             raise ValueError(
                 f"Raw enumeration space C({n}, {n_b}) = {n_choose_nb:,} "
-                f"exceeds the {_MAX_RAW:,}-structure safety limit.  This "
+                f"exceeds the {MAX_RAW_CONFIGURATIONS:,}-structure safety limit.  This "
                 f"will likely exhaust memory or run indefinitely.  Pass "
                 f"override=True only if you have confirmed the enumeration "
                 f"is tractable."
@@ -238,16 +255,7 @@ class OrderlyEnumerator:
         tiling: Tiling,
         supercell: SupercellLike = (1, 1),
     ) -> list[tuple[int, ...]]:
-        """Return the crystallographic symmetry group as site permutations.
-
-        Args:
-            tiling: Target tiling.
-            supercell: ``(na, nb)`` supercell dimensions.
-
-        Returns:
-            Unique permutation tuples representing the space-group
-            symmetry.
-        """
+        """Return the crystallographic symmetry group as site permutations."""
         atoms = _tiling_to_atoms(tiling, supercell)
         return _get_symmetry_permutations(atoms)
 
@@ -259,18 +267,6 @@ class OrderlyEnumerator:
         species: tuple[str, str] = ("B", "N"),
     ) -> Atoms:
         """Convert a binary assignment to an ASE Atoms structure.
-
-        Args:
-            tiling: The Archimedean tiling the assignment was
-                generated for.
-            supercell: ``(na, nb)`` tuple or 2×2 integer matrix supercell
-                used during enumeration.
-            assignment: A binary tuple of length *n*
-                (0 = ``species[0]``, 1 = ``species[1]``).
-            species: Pair of ASE-valid element symbols.
-
-        Returns:
-            An ASE Atoms object with the species assigned.
 
         Raises:
             ValueError: If ``len(assignment)`` does not match the supercell

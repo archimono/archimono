@@ -3,7 +3,7 @@
 Each vertex borders one triangle, two squares, and one hexagon.
 Primitive cell: 6 vertices.  Coordination number: 4.  Non-bipartite.
 Lattice: hexagonal (a = b, γ = 120°).
-Bond length is parameterised via ``Tiling.bond_length`` (default 1.0).
+Edge length is parameterised via ``Tiling.edge_length`` (default 1.0).
 """
 
 from __future__ import annotations
@@ -28,8 +28,8 @@ class RhombitrihexagonalTiling(Tiling):
     @property
     def lattice_vectors(self) -> NDArray[np.float64]:
         # Hexagonal lattice: distance between hexagon centers across a square
-        # a = 2*(apothem of hexagon) + (side of square) = bond*√3 + bond
-        a = self.bond_length * (1.0 + _S)
+        # a = 2*(apothem of hexagon) + (side of square) = edge*√3 + edge
+        a = self.edge_length * (1.0 + _S)
         return np.array(
             [
                 [a, 0.0],
@@ -41,14 +41,14 @@ class RhombitrihexagonalTiling(Tiling):
     @property
     def vertices(self) -> NDArray[np.float64]:
         # 6 vertices per primitive cell forming a regular hexagon.
-        # The radius of a regular hexagon is exactly its side length (bond_length).
+        # The radius of a regular hexagon is exactly its side length (edge_length).
         # We rotate by 30° so the flat edges face the lattice vectors,
         # leaving exact room for the connecting squares.
         angles_hex = np.radians(np.arange(6) * 60.0 + 30.0)
 
         cart = np.array(
             [
-                [self.bond_length * np.cos(a), self.bond_length * np.sin(a)]
+                [self.edge_length * np.cos(a), self.edge_length * np.sin(a)]
                 for a in angles_hex
             ],
             dtype=np.float64,
@@ -64,7 +64,7 @@ class RhombitrihexagonalTiling(Tiling):
         offsets = [(da, db) for da in (-1, 0, 1) for db in (-1, 0, 1)]
         edges: list[tuple[int, int, int, int]] = []
         seen: set[tuple[int, int, int, int]] = set()
-        tol = 0.15 * self.bond_length
+        tol = 0.15 * self.edge_length
 
         # Dynamically discover all edges (hexagon ring + squares + triangles)
         # This guarantees the coordination number of 4 is met without
@@ -76,7 +76,7 @@ class RhombitrihexagonalTiling(Tiling):
                         continue
                     shifted = frac[j] + np.array([da, db])
                     dist = float(np.linalg.norm((shifted - frac[i]) @ L))
-                    if abs(dist - self.bond_length) < tol:
+                    if abs(dist - self.edge_length) < tol:
                         key = (i, j, da, db)
                         rev = (j, i, -da, -db)
                         if key not in seen and rev not in seen:

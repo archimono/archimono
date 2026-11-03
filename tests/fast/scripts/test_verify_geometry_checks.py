@@ -2,62 +2,45 @@
 
 from __future__ import annotations
 
-import importlib.util
-import pathlib
-import types
+import io
+from pathlib import Path
 
 import pytest
 
+from archimono import verification
 from archimono.tilings import registry
 
 _KEY = "3.6.3.6"  # kagome
 
 
-def _load_verify_module() -> types.ModuleType:
-    """Load scripts/verify.py without requiring scripts to be a package."""
-    script = pathlib.Path(__file__).parents[3] / "scripts" / "verify.py"
-    spec = importlib.util.spec_from_file_location("verify_script_geom", script)
-    assert spec is not None
-    assert spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-def test_geometry_checks_return_coordination() -> None:
-    """The checker returns the computed coordination number with no coord error."""
-    verify = _load_verify_module()
-    tiling = registry.get(_KEY)
-    g_vis = tiling.graph(verify._VIS_SC[_KEY])
-    g_bp = tiling.graph(verify._BPCHECK_SC[_KEY])
-
-    errors, coord = verify._run_geometry_checks(_KEY, tiling, g_vis, g_bp)
-
-    assert coord == 4  # kagome coordination
-    assert not any("coordination" in e for e in errors)
-
-
-def test_geometry_checks_handle_coordination_valueerror(
+def test_geometry_workflow_reports_coordination_valueerror(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
-    """A coordination ValueError is recorded (coord=None), not re-raised (#55).
-
-    The status print in ``run_geometry`` previously re-read
-    ``tiling.coordination`` unguarded, so a non-vertex-transitive tiling
-    aborted the whole loop instead of reporting the error. The checker now
-    returns the cached coordination value (``None`` on failure).
-    """
-    verify = _load_verify_module()
+    """Geometry mode reports coordination errors without aborting its renders."""
+    expected = verification._EXPECTED[_KEY]
+    monkeypatch.setattr(verification, "_EXPECTED", {_KEY: expected})
     tiling = registry.get(_KEY)
-    g_vis = tiling.graph(verify._VIS_SC[_KEY])
-    g_bp = tiling.graph(verify._BPCHECK_SC[_KEY])
 
-    def _raise(_self: object) -> int:
+    def raise_value_error(_self: object) -> int:
         raise ValueError("not vertex-transitive")
 
-    monkeypatch.setattr(type(tiling), "coordination", property(_raise))
+    monkeypatch.setattr(
+        type(tiling),
+        "coordination",
+        property(raise_value_error),
+    )
+    output = io.StringIO()
+    result = verification.run_verification(
+        verification.VerificationConfig(
+            mode="geometry",
+            out_dir=tmp_path,
+            output=output,
+        )
+    )
 
-    errors, coord = verify._run_geometry_checks(_KEY, tiling, g_vis, g_bp)
-
-    assert coord is None
-    assert any("coordination check failed" in e for e in errors)
+    assert result.ok is False
+    assert result.geometry_ok is False
+    assert "coord=?" in output.getvalue()
+    assert "coordination check failed: not vertex-transitive" in output.getvalue()
+    assert (tmp_path / "overview_geometry.png").is_file()

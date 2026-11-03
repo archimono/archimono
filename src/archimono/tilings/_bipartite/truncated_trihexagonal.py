@@ -3,7 +3,7 @@
 Each vertex borders one square, one hexagon, and one 12-gon.
 Primitive cell: 12 vertices.  Coordination number: 3.  Bipartite.
 Lattice: hexagonal (a = b, γ = 120°).
-Bond length is parameterised via ``Tiling.bond_length`` (default 1.0).
+Edge length is parameterised via ``Tiling.edge_length`` (default 1.0).
 """
 
 from __future__ import annotations
@@ -29,8 +29,8 @@ class TruncatedTrihexagonalTiling(Tiling):
     def lattice_vectors(self) -> NDArray[np.float64]:
         # The true primitive cell spans the distance between the centers
         # of adjacent 12-gons.
-        # This distance exactly equals bond * (3 + √3).
-        a = self.bond_length * (3.0 + _S)
+        # This distance exactly equals edge * (3 + √3).
+        a = self.edge_length * (3.0 + _S)
         return np.array(
             [
                 [a, 0.0],
@@ -47,8 +47,8 @@ class TruncatedTrihexagonalTiling(Tiling):
         # of hexagons/squares!
         angles = np.radians(np.arange(12) * 30.0 + 15.0)
 
-        # Exact circumradius of a 12-gon with side length bond_length
-        R = self.bond_length * np.sqrt(2.0 + _S)
+        # Exact circumradius of a 12-gon with side length edge_length
+        R = self.edge_length * np.sqrt(2.0 + _S)
 
         cart = np.array(
             [[R * np.cos(a), R * np.sin(a)] for a in angles],
@@ -68,7 +68,7 @@ class TruncatedTrihexagonalTiling(Tiling):
 
         edges: list[tuple[int, int, int, int]] = []
         seen: set[tuple[int, int, int, int]] = set()
-        tol = 0.15 * self.bond_length
+        tol = 0.15 * self.edge_length
 
         # Dynamically discover all 18 undirected edges per primitive cell
         # to perfectly achieve the coordination number of 3 for all 12 vertices.
@@ -79,7 +79,7 @@ class TruncatedTrihexagonalTiling(Tiling):
                         continue
                     shifted = frac[j] + np.array([da, db])
                     dist = float(np.linalg.norm((shifted - frac[i]) @ L))
-                    if abs(dist - self.bond_length) < tol:
+                    if abs(dist - self.edge_length) < tol:
                         key = (i, j, da, db)
                         rev = (j, i, -da, -db)
                         if key not in seen and rev not in seen:

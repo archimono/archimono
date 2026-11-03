@@ -37,7 +37,9 @@ For the application to crystal-structure enumeration:
 
 from __future__ import annotations
 
-_MAX_RAW = 10_000_000
+#: Combinatorial safety limit shared by the enumeration backends: raw search
+#: spaces larger than this are rejected unless the caller overrides.
+MAX_RAW_CONFIGURATIONS = 10_000_000
 
 
 def _validate_group(n: int, group: list[tuple[int, ...]]) -> None:
@@ -47,13 +49,6 @@ def _validate_group(n: int, group: list[tuple[int, ...]]) -> None:
     and are bijections on ``range(n)``, the identity is present, and there
     are no duplicates.  Does **not** check closure or inverses (use the
     Burnside divisibility check for that).
-
-    Args:
-        n: Expected permutation length.
-        group: Symmetry group as a list of permutation tuples.
-
-    Raises:
-        ValueError: If any structural invariant is violated.
     """
     if not group:
         raise ValueError("group must contain at least one permutation.")
@@ -132,11 +127,8 @@ class BurnsideCounter:
 
         Args:
             perm: Permutation of ``range(n)``.
-            n_b: Number of label-1 atoms (= species[1]) (must satisfy
+            n_b: Number of label-1 sites (must satisfy
                 ``0 <= n_b <= n``).
-
-        Returns:
-            Number of n_b-balanced assignments fixed by *perm*.
 
         Raises:
             ValueError: If *perm* is not a bijection on
@@ -153,9 +145,7 @@ class BurnsideCounter:
         for size in cycles:
             new_dp: dict[int, int] = {}
             for j, cnt in dp.items():
-                # assign this cycle to label 0
                 new_dp[j] = new_dp.get(j, 0) + cnt
-                # assign this cycle to label 1
                 new_dp[j + size] = new_dp.get(j + size, 0) + cnt
             dp = new_dp
         return dp.get(n_b, 0)
@@ -166,13 +156,10 @@ class BurnsideCounter:
 
         Args:
             n: Total number of sites.
-            n_b: Number of label-1 atoms (= species[1]).  Must satisfy
+            n_b: Number of label-1 sites.  Must satisfy
                 ``0 <= n_b <= n``.
             group: Symmetry group as a non-empty list of permutation
                 tuples of length *n*.
-
-        Returns:
-            Number of symmetry-inequivalent balanced assignments.
 
         Raises:
             ValueError: If *group* fails structural validation
@@ -202,14 +189,6 @@ class BurnsideCounter:
         """Return the lexicographically smallest orbit representative.
 
         Delegates to :func:`~archimono.assignment.enumeration.canonical.canonical_form`.
-
-        Args:
-            assignment: A binary tuple of length *n*
-                (0 = ``species[0]``, 1 = ``species[1]``).
-            group: Symmetry group as a list of permutation tuples.
-
-        Returns:
-            The canonical (lex-minimum) representative of the orbit.
         """
         from archimono.assignment.enumeration.canonical import canonical_form
 
@@ -227,19 +206,8 @@ class BurnsideCounter:
 
         Delegates to
         :func:`~archimono.assignment.enumeration.bruteforce.enumerate_inequivalent`.
-
-        Args:
-            n: Total number of sites.
-            n_b: Number of label-1 atoms (= species[1]).
-            group: Symmetry group as a list of permutation tuples.
-            override: Bypass the safety limit on raw enumeration
-                space.
-
-        Returns:
-            One assignment per symmetry-inequivalent orbit.  The
-            returned assignments are not necessarily in canonical
-            form; they are the first lexicographic representative
-            encountered.
+        The returned assignments are not necessarily in canonical form; they are the
+        first lexicographic representative encountered.
 
         Raises:
             ValueError: If *group* fails structural validation,

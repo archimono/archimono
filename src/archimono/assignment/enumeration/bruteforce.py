@@ -12,8 +12,10 @@ from __future__ import annotations
 import math
 from itertools import combinations
 
-import archimono.assignment.enumeration.burnside as _burnside_mod
-from archimono.assignment.enumeration.burnside import _validate_group
+from archimono.assignment.enumeration.burnside import (
+    MAX_RAW_CONFIGURATIONS,
+    _validate_group,
+)
 from archimono.assignment.enumeration.canonical import canonical_form
 
 
@@ -32,7 +34,7 @@ def enumerate_inequivalent(
 
     Args:
         n: Total number of sites.
-        n_b: Number of label-1 atoms (= species[1]).
+        n_b: Number of label-1 sites (= species[1]).
         group: Symmetry group as a list of permutation tuples.
         override: Bypass the safety limit on raw enumeration space.
 
@@ -52,7 +54,7 @@ def enumerate_inequivalent(
         raise ValueError(f"n_b={n_b} out of valid range [0, {n}].")
 
     n_choose_nb = math.comb(n, n_b)
-    max_raw = _burnside_mod._MAX_RAW
+    max_raw = MAX_RAW_CONFIGURATIONS
     if not override and n_choose_nb > max_raw:
         raise ValueError(
             f"Raw enumeration space C({n}, {n_b}) = {n_choose_nb:,} "

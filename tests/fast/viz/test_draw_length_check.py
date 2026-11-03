@@ -30,7 +30,6 @@ def test_mismatched_labels_length_raises() -> None:
 
 
 def test_correct_labels_length_does_not_raise() -> None:
-    """A correctly sized labels list renders without error."""
     tiling = registry.get("kagome")
     n_sites = 2 * 2 * tiling.n_vertices
     labels = [i % 2 for i in range(n_sites)]

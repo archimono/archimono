@@ -14,7 +14,7 @@ from archimono.tilings import registry
 # (tiling_key, supercell, n_b, known_optimal_cut)
 _REFERENCE_CASES = [
     ("kagome", (2, 2), 6, 16),
-    ("triangular", (2, 2), 2, 4),
+    ("triangular", (3, 3), 2, 12),
     ("truncated_hexagonal", (1, 1), 3, 6),
 ]
 
@@ -86,7 +86,6 @@ class TestHeuristicCompositionConstraint:
     def test_annealing_respects_nb(
         self, key: str, supercell: tuple[int, int], n_b: int
     ) -> None:
-        """AnnealingSolver result has exactly n_b label-1 entries."""
         tiling = registry.get(key)
         graph = tiling.graph(supercell=supercell)
         result = AnnealingSolver(seed=42, n_restarts=3).solve(
@@ -102,7 +101,6 @@ class TestHeuristicCompositionConstraint:
     def test_greedy_respects_nb(
         self, key: str, supercell: tuple[int, int], n_b: int
     ) -> None:
-        """GreedySolver result has exactly n_b label-1 entries."""
         tiling = registry.get(key)
         graph = tiling.graph(supercell=supercell)
         result = GreedySolver(seed=42, n_restarts=3).solve(

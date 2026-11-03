@@ -19,7 +19,6 @@ class TestLargestValidInputs:
 
     @pytest.mark.parametrize("key", ALL_TILING_KEYS)
     def test_greedy_3x3_does_not_crash(self, key: str) -> None:
-        """GreedySolver handles a 3x3 supercell without crashing."""
         tiling = registry.get(key)
         try:
             graph = tiling.graph(supercell=(3, 3))
@@ -37,7 +36,6 @@ class TestLargestValidInputs:
 
     @pytest.mark.parametrize("key", ALL_TILING_KEYS)
     def test_annealing_3x3_does_not_crash(self, key: str) -> None:
-        """AnnealingSolver handles a 3x3 supercell without crashing."""
         tiling = registry.get(key)
         try:
             graph = tiling.graph(supercell=(3, 3))
@@ -58,7 +56,6 @@ class TestMalformedGraphs:
     """Solvers handle or reject malformed graph inputs."""
 
     def test_disconnected_graph(self) -> None:
-        """Solver handles disconnected graph without crash."""
         graph: nx.Graph[int] = nx.Graph()
         graph.add_edges_from([(0, 1), (2, 3)])
         result = GreedySolver(seed=42).solve(graph, ["A", "B"])

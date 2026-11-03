@@ -290,15 +290,7 @@ def open_db(path: str | Path) -> sqlite3.Connection:
 
 
 def _get_or_create_graph_id(conn: sqlite3.Connection, run: SolveRun) -> int:
-    """Upsert a graph row and return its ``graph_id``.
-
-    Args:
-        conn: Open database connection.
-        run: Run whose graph metadata should be registered.
-
-    Returns:
-        Integer ``graph_id`` for this run's graph.
-    """
+    """Upsert a graph row and return its ``graph_id``."""
     conn.execute(
         _UPSERT_GRAPH,
         (run.tiling_key, run.supercell, run.n_vertices, run.n_edges),
@@ -314,9 +306,6 @@ def _extract_solver_config(
     run: SolveRun,
 ) -> tuple[str, int, Any, Any, Any, Any]:
     """Extract solver config fields from a :class:`SolveRun`.
-
-    Args:
-        run: Run record to extract solver configuration from.
 
     Returns:
         Tuple of ``(solver, n_restarts, temperature, min_temperature,
@@ -338,13 +327,6 @@ def _get_or_create_solver_config_id(
     Uses a SELECT-first strategy because SQLite treats NULL values as distinct
     in UNIQUE constraints, making INSERT OR IGNORE unreliable when any config
     column is NULL.
-
-    Args:
-        conn: Open database connection.
-        run: Run whose solver configuration should be registered.
-
-    Returns:
-        Integer ``solver_config_id`` for this run's solver configuration.
     """
     solver, n_restarts, temperature, min_temperature, cooling_rate, steps = (
         _extract_solver_config(run)
@@ -433,14 +415,7 @@ def insert_run(
 
 
 def _row_to_run(row: sqlite3.Row) -> SolveRun:
-    """Deserialize a database row back to a :class:`SolveRun`.
-
-    Args:
-        row: A row returned by a query using :data:`_SELECT_ALL`.
-
-    Returns:
-        Populated :class:`SolveRun` instance.
-    """
+    """Deserialize a database row back to a :class:`SolveRun`."""
     raw_labels = row["labels"]
     labels: tuple[int, ...] | None = (
         tuple(int(v) for v in json.loads(raw_labels))
@@ -494,9 +469,6 @@ class SolveRunDB:
         Args:
             sql: SQL query string; must be based on :data:`_SELECT_ALL`.
             params: Positional bind parameters.
-
-        Returns:
-            List of :class:`SolveRun` instances.
         """
         rows = self._conn.execute(sql, params).fetchall()
         return [_row_to_run(r) for r in rows]
@@ -507,11 +479,7 @@ class SolveRunDB:
 
     @property
     def tilings(self) -> list[str]:
-        """Sorted unique tiling keys present in the database.
-
-        Returns:
-            Sorted list of ``tiling_key`` strings.
-        """
+        """Sorted unique tiling keys present in the database."""
         rows = self._conn.execute(
             "SELECT DISTINCT tiling_key FROM graphs ORDER BY tiling_key"
         ).fetchall()
@@ -519,11 +487,7 @@ class SolveRunDB:
 
     @property
     def solvers(self) -> list[str]:
-        """Sorted unique solver names present in the database.
-
-        Returns:
-            Sorted list of solver name strings.
-        """
+        """Sorted unique solver names present in the database."""
         rows = self._conn.execute(
             "SELECT DISTINCT solver FROM solver_configs ORDER BY solver"
         ).fetchall()
@@ -531,11 +495,7 @@ class SolveRunDB:
 
     @property
     def n_vertices_values(self) -> list[int]:
-        """Sorted unique n_vertices values present in the database.
-
-        Returns:
-            Sorted list of ``n_vertices`` integers.
-        """
+        """Sorted unique n_vertices values present in the database."""
         rows = self._conn.execute(
             "SELECT DISTINCT n_vertices FROM graphs ORDER BY n_vertices"
         ).fetchall()
@@ -543,11 +503,7 @@ class SolveRunDB:
 
     @property
     def supercells(self) -> list[str]:
-        """Sorted unique supercell strings present in the database.
-
-        Returns:
-            Sorted list of supercell strings.
-        """
+        """Sorted unique supercell strings present in the database."""
         rows = self._conn.execute(
             "SELECT DISTINCT supercell FROM graphs ORDER BY supercell"
         ).fetchall()
@@ -558,12 +514,7 @@ class SolveRunDB:
     # ------------------------------------------------------------------
 
     def all(self) -> list[SolveRun]:
-        """Return all runs in the database.
-
-        Returns:
-            All :class:`SolveRun` records, sorted by tiling key, n_vertices,
-            solver, and run index.
-        """
+        """Return all runs, sorted by tiling key, n_vertices, solver, and run index."""
         return self._query(_SELECT_ALL + _ORDER)
 
     def for_tiling(self, tiling_key: str) -> list[SolveRun]:
@@ -571,9 +522,6 @@ class SolveRunDB:
 
         Args:
             tiling_key: Registry key, e.g. ``"hexagonal"``.
-
-        Returns:
-            Filtered list of :class:`SolveRun` records.
         """
         return self._query(
             _SELECT_ALL + " WHERE g.tiling_key=?" + _ORDER,
@@ -585,9 +533,6 @@ class SolveRunDB:
 
         Args:
             solver: Solver class name, e.g. ``"GreedySolver"``.
-
-        Returns:
-            Filtered list of :class:`SolveRun` records.
         """
         return self._query(
             _SELECT_ALL + " WHERE sc.solver=?" + _ORDER,
@@ -595,14 +540,7 @@ class SolveRunDB:
         )
 
     def for_n_vertices(self, n_vertices: int) -> list[SolveRun]:
-        """Return all runs for a specific graph size.
-
-        Args:
-            n_vertices: Vertex count of the graph.
-
-        Returns:
-            Filtered list of :class:`SolveRun` records.
-        """
+        """Return all runs for a specific graph size."""
         return self._query(
             _SELECT_ALL + " WHERE g.n_vertices=?" + _ORDER,
             (n_vertices,),
@@ -614,9 +552,6 @@ class SolveRunDB:
         Args:
             tiling_key: Registry key, e.g. ``"hexagonal"``.
             solver: Solver class name, e.g. ``"AnnealingSolver"``.
-
-        Returns:
-            Filtered list of :class:`SolveRun` records.
         """
         return self._query(
             _SELECT_ALL + " WHERE g.tiling_key=? AND sc.solver=?" + _ORDER,
@@ -632,9 +567,6 @@ class SolveRunDB:
             tiling_key: Registry key, e.g. ``"hexagonal"``.
             solver: Solver class name, e.g. ``"GreedySolver"``.
             n_vertices: Vertex count of the graph.
-
-        Returns:
-            Filtered list of :class:`SolveRun` records.
         """
         return self._query(
             _SELECT_ALL
@@ -648,9 +580,6 @@ class SolveRunDB:
 
         Args:
             supercell: Supercell string, e.g. ``"(2x3)"``.
-
-        Returns:
-            Filtered list of :class:`SolveRun` records.
         """
         return self._query(
             _SELECT_ALL + " WHERE g.supercell=?" + _ORDER,
@@ -671,9 +600,6 @@ class SolveRunDB:
             solver: Solver class name, e.g. ``"GreedySolver"``.
             n_vertices: Vertex count of the graph.
             supercell: Supercell string, e.g. ``"(2x3)"``.
-
-        Returns:
-            Filtered list of :class:`SolveRun` records.
         """
         return self._query(
             _SELECT_ALL
@@ -689,9 +615,6 @@ class SolveRunDB:
         Args:
             tiling_key: Registry key, e.g. ``"hexagonal"``.
             n_vertices: Vertex count of the graph.
-
-        Returns:
-            Filtered list of :class:`SolveRun` records.
         """
         return self._query(
             _SELECT_ALL + " WHERE g.tiling_key=? AND g.n_vertices=?" + _ORDER,

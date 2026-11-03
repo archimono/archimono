@@ -3,7 +3,7 @@
 Each vertex borders six triangles.
 Primitive cell: 1 vertex.  Coordination number: 6.  Non-bipartite.
 Lattice: hexagonal (a = b, γ = 60°).
-Bond length is parameterised via ``Tiling.bond_length`` (default 1.0).
+Edge length is parameterised via ``Tiling.edge_length`` (default 1.0).
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ class TriangularTiling(Tiling):
     @property
     def lattice_vectors(self) -> NDArray[np.float64]:
         # Standard hexagonal lattice
-        a = self.bond_length
+        a = self.edge_length
         return np.array(
             [
                 [a, 0.0],

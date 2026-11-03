@@ -35,22 +35,28 @@ class TestNodeCountScaling:
 
 
 class TestEdgeCountScaling:
-    """Edge count is bounded by coordination number for all supercells."""
+    """Edge count matches the physical coordination-number formula."""
 
     @pytest.mark.parametrize("key", ALL_TILING_KEYS)
     @pytest.mark.parametrize("supercell", _SUPERCELLS)
-    def test_edge_count_bounded(
+    def test_edge_count_matches_formula(
         self, key: str, supercell: tuple[int, int]
     ) -> None:
-        """Edge count <= coordination * n_nodes / 2."""
+        """Edge count == coordination * n_nodes / 2 wherever construction succeeds.
+
+        A wrapped supercell that would silently collapse two physical edge
+        instances onto the same node pair raises ValueError instead of
+        succeeding with an undercounted graph (edge aliasing guard in
+        Tiling._graph_matrix) -- so this is an exact invariant, not just an
+        upper bound, for every supercell that builds at all.
+        """
         tiling = registry.get(key)
         try:
             graph = tiling.graph(supercell=supercell)
         except ValueError:
             pytest.skip(f"{key} does not support supercell {supercell}")
-        max_edges = tiling.coordination * graph.number_of_nodes() // 2
-        assert graph.number_of_edges() <= max_edges
-        assert graph.number_of_edges() > 0
+        expected_edges = tiling.coordination * graph.number_of_nodes() // 2
+        assert graph.number_of_edges() == expected_edges
 
 
 class TestNoDuplicateEdges:
@@ -61,7 +67,7 @@ class TestNoDuplicateEdges:
     def test_simple_graph(
         self, key: str, supercell: tuple[int, int]
     ) -> None:
-        """Graph is simple (no self-loops, no parallel edges)."""
+        """Graph is simple (no self-loops, no parallel edges, no undercounting)."""
         tiling = registry.get(key)
         try:
             graph = tiling.graph(supercell=supercell)
@@ -69,6 +75,11 @@ class TestNoDuplicateEdges:
             pytest.skip(f"{key} does not support supercell {supercell}")
         assert isinstance(graph, nx.Graph)
         assert nx.number_of_selfloops(graph) == 0
+        # Positive proof of the edge-aliasing guard: no edge was silently
+        # dropped, so the physical edge count is exact, not just an upper
+        # bound.
+        expected_edges = tiling.coordination * graph.number_of_nodes() // 2
+        assert graph.number_of_edges() == expected_edges
 
 
 class TestConnectivity:
@@ -77,7 +88,6 @@ class TestConnectivity:
     @pytest.mark.parametrize("key", ALL_TILING_KEYS)
     @pytest.mark.parametrize("supercell", _SUPERCELLS)
     def test_connected(self, key: str, supercell: tuple[int, int]) -> None:
-        """Graph is a single connected component."""
         tiling = registry.get(key)
         try:
             graph = tiling.graph(supercell=supercell)

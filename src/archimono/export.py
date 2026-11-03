@@ -68,11 +68,6 @@ def write_structure(
     an explicit *fmt* string (``"vasp"``, ``"cif"``, ``"xyz"``, …) to
     override.
 
-    Args:
-        atoms: Structure to write.
-        path: Destination file path.
-        fmt: ASE format string.  ``None`` lets ASE infer from the extension.
-
     Raises:
         ase.io.formats.UnknownFileTypeError: If the format cannot be inferred
             from the extension and *fmt* is ``None``.

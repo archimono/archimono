@@ -3,7 +3,7 @@
 Each vertex borders one triangle and two 12-gons.
 Primitive cell: 6 vertices.  Coordination number: 3.  Non-bipartite.
 Lattice: hexagonal (a = b, γ = 120°).
-Bond length is parameterised via ``Tiling.bond_length`` (default 1.0).
+Edge length is parameterised via ``Tiling.edge_length`` (default 1.0).
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ class TruncatedHexagonalTiling(Tiling):
     @property
     def lattice_vectors(self) -> NDArray[np.float64]:
         # Distance between centers of adjacent 12-gons
-        a = self.bond_length * (2.0 + _S)
+        a = self.edge_length * (2.0 + _S)
         return np.array(
             [
                 [a, 0.0],
@@ -46,8 +46,8 @@ class TruncatedHexagonalTiling(Tiling):
         # 12-gon to form our asymmetric unit:
         angles = np.radians([-15.0, 15.0, 45.0, 75.0, 105.0, 135.0])
 
-        # Circumradius of a 12-gon with edge length bond_length
-        R = self.bond_length * np.sqrt(2.0 + _S)
+        # Circumradius of a 12-gon with edge length edge_length
+        R = self.edge_length * np.sqrt(2.0 + _S)
 
         cart = np.array(
             [[R * np.cos(a), R * np.sin(a)] for a in angles],
@@ -67,7 +67,7 @@ class TruncatedHexagonalTiling(Tiling):
 
         edges: list[tuple[int, int, int, int]] = []
         seen: set[tuple[int, int, int, int]] = set()
-        tol = 0.15 * self.bond_length
+        tol = 0.15 * self.edge_length
 
         # Dynamically discover all 9 undirected edges per primitive cell
         # to perfectly achieve the coordination number of 3 for all 6 vertices.
@@ -78,7 +78,7 @@ class TruncatedHexagonalTiling(Tiling):
                         continue
                     shifted = frac[j] + np.array([da, db])
                     dist = float(np.linalg.norm((shifted - frac[i]) @ L))
-                    if abs(dist - self.bond_length) < tol:
+                    if abs(dist - self.edge_length) < tol:
                         key = (i, j, da, db)
                         rev = (j, i, -da, -db)
                         if key not in seen and rev not in seen:

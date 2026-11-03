@@ -19,11 +19,9 @@ class TestBackendSelector:
     """``enumeration.get`` resolves backend names to enumerator instances."""
 
     def test_default_is_orderly(self) -> None:
-        """No argument selects the orderly backend."""
         assert isinstance(enumeration.get(), OrderlyEnumerator)
 
     def test_default_backend_constant(self) -> None:
-        """DEFAULT_BACKEND names the orderly backend."""
         assert DEFAULT_BACKEND == "orderly"
         assert isinstance(enumeration.get(DEFAULT_BACKEND), OrderlyEnumerator)
 
@@ -43,7 +41,6 @@ class TestBackendSelector:
             enumeration.get("nonexistent")
 
     def test_returns_fresh_instances(self) -> None:
-        """Each call constructs a new enumerator instance."""
         assert enumeration.get() is not enumeration.get()
 
 
@@ -53,7 +50,7 @@ class TestBackendInterchangeability:
     def test_identical_kwargs_agree(self) -> None:
         """get(b).enumerate(...) accepts the same kwargs and agrees for both b."""
         tiling = registry.get("triangular")
-        kwargs = {"n_b": 2, "supercell": (2, 2), "min_cut": 0, "override": False}
+        kwargs = {"n_b": 2, "supercell": (3, 3), "min_cut": 0, "override": False}
 
         results = {
             backend: enumeration.get(backend).enumerate(tiling, **kwargs)
@@ -87,7 +84,7 @@ class TestIcetFreeImport:
             enum = enumeration.get()
             assert type(enum).__name__ == "OrderlyEnumerator"
             configs = enum.enumerate(
-                registry.get("triangular"), n_b=2, supercell=(2, 2)
+                registry.get("triangular"), n_b=2, supercell=(3, 3)
             )
             assert len(configs) > 0
             print("OK")

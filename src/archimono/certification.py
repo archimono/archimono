@@ -76,7 +76,6 @@ class CertificationRecord:
     certified_cut_efficiency: float | None
     runtime_ms: float
     status: str
-    exact_planar_cut_value: float | None = None
     note: str = ""
     metadata: dict[str, Any] = dataclasses.field(default_factory=dict)
 
@@ -97,9 +96,6 @@ def format_supercell(matrix: npt.NDArray[np.intp]) -> str:
         matrix: A 2×2 integer array in Hermite Normal Form, with
             ``matrix[0, 0]`` and ``matrix[1, 1]`` as diagonal entries and
             ``matrix[0, 1]`` as the upper-right shear entry.
-
-    Returns:
-        A human-readable string representation of the supercell.
     """
     a = int(matrix[0, 0])
     b_shear = int(matrix[0, 1])
@@ -121,16 +117,6 @@ def resolve_target_sizes(
     positive values ``<= max_n`` and deduplicated. When an explicit list is
     given it is filtered to positive values only (max_n is ignored) and
     deduplicated.
-
-    Args:
-        target_sizes: Explicit sizes to use, or ``None`` to fall back to
-            ``default``.
-        default: Default size list used when ``target_sizes`` is ``None``.
-        max_n: Upper bound applied to ``default`` when ``target_sizes``
-            is ``None``.
-
-    Returns:
-        Sorted, deduplicated list of positive integers.
     """
     if target_sizes is None:
         return sorted(set(n for n in default if 0 < n <= max_n))
@@ -153,9 +139,6 @@ def resolve_tilings(
             ``"frustrated"``).  Pass ``None`` to request all tilings.
         catalogue: Full tiling catalogue to resolve against.  Defaults to
             :data:`TILINGS` when ``None``.
-
-    Returns:
-        Ordered list of ``(registry_key, display_name)`` pairs.
 
     Raises:
         ValueError: If any key is not a recognised registry key or special
@@ -217,9 +200,6 @@ def make_skip_record(
         target_n: Target number of vertices requested.
         vertex_config: Vertex composition string (e.g. ``"AB"``).
         note: Human-readable explanation for the skip.
-
-    Returns:
-        A :class:`CertificationRecord` with ``status='skip'``.
     """
     return CertificationRecord(
         tiling_key=tiling_key,
@@ -240,6 +220,67 @@ def make_skip_record(
     )
 
 
+def build_bruteforce_record(
+    *,
+    tiling_key: str,
+    tiling_display: str,
+    vertex_config: str,
+    target_n: int,
+    realized_n: int,
+    supercell: str,
+    n_edges: int,
+    cut_value: float,
+    runtime_ms: float,
+    target_composition: tuple[int, int],
+    optimal_labels: list[tuple[int, ...]],
+    total_states: int,
+    solver_metadata: dict[str, Any],
+) -> CertificationRecord:
+    """Construct a CertificationRecord with the standard schema for brute force.
+
+    Args:
+        tiling_key: Tiling registry key.
+        tiling_display: Tiling display name.
+        vertex_config: Vertex composition config.
+        target_n: Requested number of vertices.
+        realized_n: Node count of the supercell graph.
+        supercell: Formatted supercell matrix/tuple string.
+        n_edges: Edge count of the supercell graph.
+        cut_value: Best cut value found.
+        runtime_ms: Solver runtime in milliseconds.
+        target_composition: Target binary composition tuple (n_0, n_1).
+        optimal_labels: List of all optimal label tuples.
+        total_states: Total states in the exhaustive search space.
+        solver_metadata: Dictionary of extra solver-specific metadata.
+    """
+    cut_efficiency = cut_value / n_edges if n_edges > 0 else 0.0
+    return CertificationRecord(
+        tiling_key=tiling_key,
+        tiling_display=tiling_display,
+        solver="fixed_composition_bruteforce",
+        assignment_index=1,
+        n_optimal_assignments=len(optimal_labels),
+        vertex_config=vertex_config,
+        target_n=target_n,
+        realized_n=realized_n,
+        supercell=supercell,
+        n_edges=n_edges,
+        certified_cut_value=float(cut_value),
+        certified_cut_efficiency=cut_efficiency,
+        runtime_ms=runtime_ms,
+        status="certified",
+        note="",
+        metadata={
+            "species": ("A", "B"),
+            "target_composition": target_composition,
+            "all_labels": [tuple(lbl) for lbl in optimal_labels],
+            "n_states_total": total_states,
+            **{k: v for k, v in solver_metadata.items() if k != "optimal_labels"},
+        },
+    )
+
+
+
 # ---------------------------------------------------------------------------
 # Packed-bits sidecar I/O (private)
 # ---------------------------------------------------------------------------
@@ -251,11 +292,6 @@ def _save_packed_labels(
     label_width: int,
 ) -> None:
     """Write binary label tuples to a compressed NumPy packed-bits file.
-
-    Args:
-        path: Destination ``.npz`` file path.
-        labels: List of label tuples, each of length ``label_width``.
-        label_width: Number of bits per label.
 
     Raises:
         ValueError: If ``labels`` is empty or ``label_width`` is zero.
@@ -278,12 +314,6 @@ def _save_packed_labels(
 
 def _load_packed_labels(path: pathlib.Path) -> list[tuple[int, ...]]:
     """Load binary label tuples from a packed-bits NumPy sidecar file.
-
-    Args:
-        path: Path to a ``.npz`` file written by :func:`_save_packed_labels`.
-
-    Returns:
-        List of label tuples with the original bit-width.
 
     Raises:
         FileNotFoundError: If the sidecar file does not exist.
@@ -337,16 +367,16 @@ def write_case_json(
         out_dir: Destination directory for per-case JSON files.
         record: Certification record to serialize.
         generated_by: Script or module name producing this record.
-
-    Returns:
-        The path written to disk.
     """
     out_dir.mkdir(parents=True, exist_ok=True)
     path = out_dir / case_json_name(record)
     record_dict = dataclasses.asdict(record)
 
-    all_labels: list[Any] | None = record_dict["metadata"].get("all_labels")
-    if all_labels:
+    # all_labels is a sequence of 0/1 label rows: a list[tuple[int, ...]] on the
+    # bruteforce path, or a uint8 ndarray on the frontier-DP path.
+    all_labels: list[Any] | npt.NDArray[np.uint8] | None
+    all_labels = record_dict["metadata"].get("all_labels")
+    if all_labels is not None and len(all_labels):
         label_width = len(all_labels[0])
         sidecar_name = path.stem + "-labels.npz"
         _save_packed_labels(
@@ -371,9 +401,16 @@ def write_case_json(
 
 
 def load_case_json(path: pathlib.Path) -> CertificationRecord:
-    """Load one per-case certification JSON file."""
+    """Load one per-case certification JSON file.
+
+    Unknown keys in the stored record are dropped so that JSON written by
+    older schema versions (e.g. the removed ``exact_planar_cut_value`` field)
+    still loads.
+    """
     payload = json.loads(path.read_text(encoding="utf-8"))
-    return CertificationRecord(**payload["record"])
+    known = {f.name for f in dataclasses.fields(CertificationRecord)}
+    record = {k: v for k, v in payload["record"].items() if k in known}
+    return CertificationRecord(**record)
 
 
 def load_case_json_dir(out_dir: pathlib.Path) -> list[CertificationRecord]:
@@ -449,9 +486,6 @@ def render_markdown_summary(
             fixed columns. Each entry is a ``(header, extractor)`` pair where
             ``extractor`` receives a :class:`CertificationRecord` and returns
             the formatted cell string.
-
-    Returns:
-        Markdown text in the same report shape as the certification script.
     """
     extra_columns = extra_columns or []
     case_records = _collapse_case_records(records)
@@ -531,13 +565,8 @@ def write_markdown_summary(
 ) -> None:
     """Write a markdown summary generated from per-case JSON records.
 
-    Args:
-        path: Destination file path for the markdown output.
-        records: Certification results loaded from per-case JSON files.
-        title: Report title, forwarded to :func:`render_markdown_summary`.
-        description: One-sentence description of the solver or method that
-            produced these results, forwarded to :func:`render_markdown_summary`.
-        extra_columns: Forwarded to :func:`render_markdown_summary`.
+    *title*, *description*, and *extra_columns* are forwarded to
+    :func:`render_markdown_summary`.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(

@@ -5,7 +5,7 @@ from __future__ import annotations
 import abc
 from collections.abc import Sequence
 
-from archimono.assignment.solvers import base
+from archimono.assignment.solvers import _validation, base
 
 AdjacencyMap = dict[int, list[tuple[int, float]]]
 
@@ -19,22 +19,13 @@ class HeuristicAssignmentSolver(base.AssignmentSolver, abc.ABC):
         n_b: int | None,
     ) -> base.TargetComposition:
         """Return the heuristic solver's fixed composition target."""
-        if n_b is None:
-            n_b = n_nodes // 2
-        if not isinstance(n_b, int) or isinstance(n_b, bool):
-            raise ValueError("n_b must be an integer count of 1 labels.")
-        if n_b < 0 or n_b > n_nodes:
-            raise ValueError(f"n_b must satisfy 0 <= n_b <= {n_nodes}.")
-        return (n_nodes - n_b, n_b)
+        return _validation.resolve_fixed_composition(n_nodes, n_b)
 
     @staticmethod
     def _adjacency_weights(
         edges: Sequence[base.AssignmentEdge],
     ) -> AdjacencyMap:
         """Build the weighted neighbor map used by the heuristic solvers.
-
-        Args:
-            edges: Weighted graph edges as `(i, j, weight)` triples.
 
         Returns:
             A dictionary keyed by node index. Each value is a list of

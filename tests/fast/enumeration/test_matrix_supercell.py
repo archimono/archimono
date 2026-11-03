@@ -16,9 +16,9 @@ from archimono.assignment.enumeration.burnside import BurnsideCounter
 from archimono.assignment.enumeration.orderly import OrderlyEnumerator
 from archimono.tilings import registry
 
-# snub square 3².4.3.4 with a sheared cell: det = 2, n = 8 atoms.
+# snub square 3².4.3.4 with a sheared cell: det = 4, n = 16 atoms.
 _KEY = "snub_square"
-_MATRIX = np.array([[1, 1], [0, 2]], dtype=np.intp)
+_MATRIX = np.array([[2, 1], [0, 2]], dtype=np.intp)
 
 
 def test_atom_order_matches_graph_nodes_for_matrix_supercell() -> None:

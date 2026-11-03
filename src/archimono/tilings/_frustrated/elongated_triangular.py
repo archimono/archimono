@@ -3,7 +3,7 @@
 Each vertex borders three triangles and two squares in alternation.
 Primitive cell: 4 vertices.  Coordination number: 5.  Non-bipartite.
 Lattice: rectangular (a ≠ b, γ = 90°).
-Bond length is parameterised via ``Tiling.bond_length`` (default 1.0).
+Edge length is parameterised via ``Tiling.edge_length`` (default 1.0).
 """
 
 from __future__ import annotations
@@ -39,9 +39,9 @@ class ElongatedTriangularTiling(Tiling):
         # A true rectangular cell spans two rows of squares and two rows of triangles
         # to account for the alternating 0.5 x-shift.
         # b = 2 * (square_height) + 2 * (triangle_height)
-        # b = 2 * bond + 2 * (bond * √3 / 2) = bond * (2 + √3)
-        a = self.bond_length
-        b = self.bond_length * (2.0 + _S)
+        # b = 2 * edge + 2 * (edge * √3 / 2) = edge * (2 + √3)
+        a = self.edge_length
+        b = self.edge_length * (2.0 + _S)
         return np.array(
             [
                 [a, 0.0],

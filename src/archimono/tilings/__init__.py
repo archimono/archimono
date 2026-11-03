@@ -5,6 +5,7 @@ from archimono.tilings.base import (
     SupercellLike,
     Tiling,
     min_valid_supercell_matrix,
+    parse_supercell,
     valid_supercell_matrices,
 )
 
@@ -12,6 +13,8 @@ __all__ = [
     "SupercellLike",
     "Tiling",
     "min_valid_supercell_matrix",
+    "parse_supercell",
     "valid_supercell_matrices",
     "registry",
 ]
+

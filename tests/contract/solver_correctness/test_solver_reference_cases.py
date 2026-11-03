@@ -88,29 +88,30 @@ class TestBipartiteOptimality:
 class TestResultLabelsValid:
     """Solver results contain valid binary partitions."""
 
+    # triangular aliases at (2,2) (see Tiling._graph_matrix); (3,3) is its
+    # smallest supported supercell. kagome is unaffected at (2,2).
+    _SUPERCELL_BY_KEY = {"kagome": (2, 2), "triangular": (3, 3)}
+
     @pytest.mark.parametrize("key", ["kagome", "triangular"])
     def test_labels_are_binary(self, key: str) -> None:
-        """Labels contain only 0 and 1."""
         tiling = registry.get(key)
-        graph = tiling.graph(supercell=(2, 2))
+        graph = tiling.graph(supercell=self._SUPERCELL_BY_KEY[key])
         n_b = graph.number_of_nodes() // 2
         result = BruteforceSolver().solve(graph, ["A", "B"], n_b=n_b)
         assert all(lbl in (0, 1) for lbl in result.labels)
 
     @pytest.mark.parametrize("key", ["kagome", "triangular"])
     def test_labels_length_matches_nodes(self, key: str) -> None:
-        """Labels tuple has one entry per node."""
         tiling = registry.get(key)
-        graph = tiling.graph(supercell=(2, 2))
+        graph = tiling.graph(supercell=self._SUPERCELL_BY_KEY[key])
         n_b = graph.number_of_nodes() // 2
         result = BruteforceSolver().solve(graph, ["A", "B"], n_b=n_b)
         assert len(result.labels) == graph.number_of_nodes()
 
     @pytest.mark.parametrize("key", ["kagome", "triangular"])
     def test_nb_constraint_respected(self, key: str) -> None:
-        """When n_b is specified, exactly n_b nodes have label 1."""
         tiling = registry.get(key)
-        graph = tiling.graph(supercell=(2, 2))
+        graph = tiling.graph(supercell=self._SUPERCELL_BY_KEY[key])
         n_b = graph.number_of_nodes() // 2
         result = BruteforceSolver().solve(graph, ["A", "B"], n_b=n_b)
         assert sum(result.labels) == n_b
@@ -120,12 +121,14 @@ class TestResultLabelsValid:
 class TestNonBalancedExactSolvers:
     """Exact solvers agree and respect composition at non-balanced n_b."""
 
-    # (key, supercell, n_b): kagome 2x2 has n=12 (n//3=4, 2n//3=8).
+    # (key, supercell, n_b): kagome 2x2 has n=12 (n//3=4, 2n//3=8);
+    # triangular 3x3 has n=9 (n//3=3, 2n//3=6) -- its smallest supported
+    # supercell, since (2,2) aliases (see Tiling._graph_matrix).
     _CASES = [
         ("kagome", (2, 2), 4),
         ("kagome", (2, 2), 8),
-        ("triangular", (2, 2), 1),
-        ("triangular", (2, 2), 3),
+        ("triangular", (3, 3), 3),
+        ("triangular", (3, 3), 6),
     ]
 
     @pytest.mark.parametrize(
@@ -154,16 +157,18 @@ class TestNonBalancedExactSolvers:
 class TestSingleMinoritySpecies:
     """Edge compositions n_b=1 and n_b=n-1: every solver reaches the optimum.
 
-    Covered for triangular 2x2 (n=4) per #53's edge-coverage request. The
-    optimum is whatever the exact bruteforce solver finds; both the other exact
-    solver and the heuristics must match it (the search space is tiny here).
+    Covered for triangular 3x3 (n=9) per #53's edge-coverage request --
+    triangular's smallest supported supercell, since (2,2) aliases (see
+    Tiling._graph_matrix). The optimum is whatever the exact bruteforce
+    solver finds; both the other exact solver and the heuristics must match
+    it (the search space is tiny here).
     """
 
-    @pytest.mark.parametrize("n_b", [1, 3], ids=["nb1", "nb_n_minus_1"])
+    @pytest.mark.parametrize("n_b", [1, 8], ids=["nb1", "nb_n_minus_1"])
     def test_triangular_single_species(self, n_b: int) -> None:
         """All four solvers agree on the optimal cut and respect composition."""
         tiling = registry.get("triangular")
-        graph = tiling.graph(supercell=(2, 2))
+        graph = tiling.graph(supercell=(3, 3))
 
         brute = BruteforceSolver().solve(graph, ["A", "B"], n_b=n_b)
         frontier = FrontierExactSolver().solve(graph, ["A", "B"], n_b=n_b)

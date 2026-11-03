@@ -10,8 +10,9 @@ Hadlock, F. (1975).
     Finding a Maximum Cut of a Planar Graph in Polynomial Time.
     *SIAM J. Comput.* 4(3), 221–225.
     https://doi.org/10.1137/0204019
-    The T-join reduction (Eq. 3) and matching reduction (§3) used by
-    ``_solve_unbalanced_hadlock``.
+    The reduction to a minimum odd-vertex pairing in the dual (§3) and to
+    maximum weighted matching (§4), which ``_solve_unbalanced_hadlock``
+    implements as a minimum-weight T-join.
 """
 
 from __future__ import annotations
@@ -83,15 +84,6 @@ class HadlockSolver(base.AssignmentSolver):
     ) -> base.TargetComposition | None:
         """Return ``None`` — Hadlock solves the unconstrained problem.
 
-        Args:
-            n_nodes: Total number of graph nodes.
-            n_b: Must be ``None``. Passing a value raises ``ValueError``
-                because the Hadlock algorithm does not support fixed-composition
-                constraints.
-
-        Returns:
-            Always ``None``.
-
         Raises:
             ValueError: If ``n_b`` is not ``None``.
         """
@@ -109,12 +101,6 @@ class HadlockSolver(base.AssignmentSolver):
         graph: nx.Graph[int],
     ) -> planarity.PlanarEmbedding[int]:
         """Return a planar embedding or raise if the graph is non-planar.
-
-        Args:
-            graph: Assignment graph to embed.
-
-        Returns:
-            A planar embedding of ``graph``.
 
         Raises:
             ValueError: If ``graph`` is not planar.
@@ -171,9 +157,7 @@ class HadlockSolver(base.AssignmentSolver):
             graph=graph,
         )
 
-        n_frustrated = sum(
-            1 for u, v in graph.edges() if labels[int(u)] == labels[int(v)]
-        )
+        n_frustrated = _scoring.count_frustrated_edges(graph, labels)
         return base.AssignmentResult(
             labels=labels,
             objective_value=cut_value,
@@ -197,9 +181,6 @@ class HadlockSolver(base.AssignmentSolver):
 def _validate_edge_weights(edges: Sequence[base.AssignmentEdge]) -> None:
     """Validate the weighted edges accepted by the Hadlock solver.
 
-    Args:
-        edges: Weighted graph edges as ``(i, j, weight)`` triples.
-
     Raises:
         ValueError: If any edge weight is non-positive.
     """
@@ -213,10 +194,6 @@ def _solve_unbalanced_hadlock(
     graph: nx.Graph[int],
 ) -> tuple[base.AssignmentLabels, float, dict[str, object]]:
     """Solve unconstrained planar MAX-CUT via Hadlock's dual reduction.
-
-    Args:
-        embedding: Planar embedding of ``graph`` produced by NetworkX.
-        graph: Connected planar assignment graph.
 
     Returns:
         A tuple containing the optimal assignment labels, the corresponding
@@ -268,9 +245,6 @@ def _enumerate_faces(
 ) -> tuple[list[_Face], dict[tuple[int, int], int]]:
     """Enumerate all faces of a planar embedding.
 
-    Args:
-        embedding: Planar embedding whose half-edges define the face cycles.
-
     Returns:
         A list of face records and a mapping from each directed half-edge to
         the id of the face that contains it.
@@ -308,10 +282,6 @@ def _build_dual_graph(
     graph: nx.Graph[int],
 ) -> tuple[list[_DualEdge], dict[int, list[int]]]:
     """Build the weighted dual multigraph induced by the primal graph.
-
-    Args:
-        face_of_half_edge: Mapping from directed primal half-edges to face ids.
-        graph: Planar primal graph.
 
     Returns:
         The dual-edge records and a face-indexed adjacency list of dual-edge
@@ -364,9 +334,6 @@ def _minimum_t_join_edges(
         dual_adjacency: Face-indexed dual adjacency as dual-edge ids.
         dual_edges: Weighted dual-edge records.
         odd_faces: Face ids with odd boundary length in the primal embedding.
-
-    Returns:
-        The set of dual-edge ids in the minimum T-join.
 
     Raises:
         RuntimeError: If the odd-face set cannot be perfectly matched in the
@@ -425,11 +392,6 @@ def _dual_dijkstra(
 ) -> tuple[dict[int, float], dict[int, tuple[int, int]]]:
     """Return shortest-path data from one source face in the dual graph.
 
-    Args:
-        dual_adjacency: Face-indexed dual adjacency as dual-edge ids.
-        dual_edges: Weighted dual-edge records.
-        source: Source face id.
-
     Returns:
         The shortest-path distances from ``source`` and predecessor data needed
         to reconstruct those paths.
@@ -469,16 +431,7 @@ def _reconstruct_dual_path(
     source: int,
     target: int,
 ) -> list[int]:
-    """Reconstruct one shortest dual path as dual-edge ids.
-
-    Args:
-        predecessors: Predecessor map produced by ``_dual_dijkstra``.
-        source: Source face id.
-        target: Target face id.
-
-    Returns:
-        The ordered dual-edge ids along the shortest path from ``source`` to
-        ``target``.
+    """Reconstruct one shortest dual path as ordered dual-edge ids.
 
     Raises:
         RuntimeError: If no predecessor chain reaches ``source``.

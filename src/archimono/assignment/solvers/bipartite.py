@@ -4,7 +4,7 @@ For a bipartite tiling the species-assignment problem is degenerate: the
 graph admits a unique 2-coloring (up to global swap of the two species), and
 that coloring is automatically optimal — every edge runs between the two
 independent sets, so MAX-CUT equals ``|E|`` and there are zero frustrated
-bonds.
+edges.
 
 All four bipartite Archimedean tilings (6³, 4⁴, 4.8², 4.6.12) are
 **regular** bipartite graphs (every vertex has the same coordination number).
@@ -73,7 +73,7 @@ class BipartiteAssigner:
                 tilings raise :class:`ValueError` — use a MAX-CUT
                 solver from :mod:`archimono.assignment.solvers.annealing`
                 instead.
-            n_b: Number of label-1 atoms (sublattice B).  Must equal ``n / 2``
+            n_b: Number of label-1 nodes (sublattice B).  Must equal ``n / 2``
                 where *n* is the number of sites in the supercell,
                 since all bipartite Archimedean tilings are regular
                 bipartite graphs whose two independent sets have
@@ -150,9 +150,7 @@ class BipartiteAssigner:
 
         edges = _scoring.weighted_edge_list(graph)
         cut_value = _scoring.maxcut_value(labels, edges)
-        n_frustrated = sum(
-            1 for u, v in graph.edges() if labels[int(u)] == labels[int(v)]
-        )
+        n_frustrated = _scoring.count_frustrated_edges(graph, labels)
 
         return base.AssignmentResult(
             labels=labels,

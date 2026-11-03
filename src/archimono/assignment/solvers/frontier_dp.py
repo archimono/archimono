@@ -1,36 +1,25 @@
 """Exact fixed-composition MAX-CUT via frontier dynamic programming.
 
-Four solver variants, differing only in vertex-ordering strategy:
-
-- :class:`FrontierExactSolverNatural`: processes vertices in natural
-  (sorted) order — no candidate evaluation overhead.
-- :class:`FrontierExactSolver`: evaluates geometric sweep candidates and
-  picks the one with the smallest maximum frontier size.
-- :class:`FrontierExactSolverCK`: uses Cuthill-McKee ordering only.
-- :class:`FrontierExactSolverGreedy`: uses greedy minimum-degree
-  elimination only.
-
-All four share an identical frontier-DP back-end.
+:class:`FrontierExactSolver` evaluates geometric sweep candidates and picks
+the one with the smallest maximum frontier size.
 """
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
-from math import inf
+from math import comb, inf
 from typing import NamedTuple
 
 import networkx as nx
+import numpy as np
+import numpy.typing as npt
 from networkx.utils.rcm import cuthill_mckee_ordering as _cuthill_mckee_ordering
 
-from archimono.assignment.solvers import _validation, base
+from archimono.assignment.solvers import _scoring, _validation, base
 
 # frontier_bitmask packed as int, n_ones_used
 StateKey = tuple[int, int]
-
-# Switch to two-pass reconstruction above this node count to avoid
-# accumulating O(n * 2^k) parent-map objects in RAM.
-_TWO_PASS_THRESHOLD = 36
 
 
 class _FrontierStats(NamedTuple):
@@ -48,10 +37,12 @@ class _OrderCandidate:
     dp_cost: float
 
 
-class _FrontierDPBase(base.AssignmentSolver):
-    """Shared solve() logic for all frontier-DP solver variants.
+class FrontierExactSolver(base.AssignmentSolver):
+    """Frontier DP solver using geometric sweep candidate selection.
 
-    Subclasses implement :meth:`_select_order` to choose a vertex ordering.
+    Evaluates the natural order, its reverse, and up to four geometric
+    sweeps derived from node ``pos`` attributes when available. Picks the
+    candidate with the smallest maximum frontier size.
     """
 
     def _target_composition(
@@ -59,36 +50,16 @@ class _FrontierDPBase(base.AssignmentSolver):
         n_nodes: int,
         n_b: int | None,
     ) -> base.TargetComposition:
-        """Return the exact fixed-composition target for the frontier DP.
-
-        Args:
-            n_nodes: Total number of vertices in the graph.
-            n_b: Desired count of label-1 vertices. Defaults to ``n_nodes // 2``.
-
-        Returns:
-            A ``(n_a, n_b)`` pair summing to ``n_nodes``.
+        """Return the exact composition target, defaulting ``n_b`` to ``n_nodes // 2``.
 
         Raises:
             ValueError: If ``n_b`` is not a valid integer in ``[0, n_nodes]``.
         """
-        if n_b is None:
-            n_b = n_nodes // 2
-        if not isinstance(n_b, int) or isinstance(n_b, bool):
-            raise ValueError("n_b must be an integer count of 1 labels.")
-        if n_b < 0 or n_b > n_nodes:
-            raise ValueError(f"n_b must satisfy 0 <= n_b <= {n_nodes}.")
-        return (n_nodes - n_b, n_b)
+        return _validation.resolve_fixed_composition(n_nodes, n_b)
 
     def _select_order(self, graph: nx.Graph[int]) -> _OrderCandidate:
-        """Return the chosen ordering candidate.
-
-        Args:
-            graph: The input graph.
-
-        Returns:
-            The selected :class:`_OrderCandidate`.
-        """
-        raise NotImplementedError
+        """Return the best geometric-sweep candidate ordered by max frontier size."""
+        return _best_geometric_order(graph)
 
     def solve(
         self,
@@ -97,6 +68,7 @@ class _FrontierDPBase(base.AssignmentSolver):
         *,
         n_b: int | None = None,
         enumerate_all: bool = False,
+        max_optima: int | None = None,
     ) -> base.AssignmentResult:
         """Solve a fixed-composition binary MAX-CUT instance exactly.
 
@@ -106,37 +78,45 @@ class _FrontierDPBase(base.AssignmentSolver):
             n_b: Number of vertices to assign label ``species[1]``.  Defaults to
                 ``graph.number_of_nodes() // 2``.
             enumerate_all: If ``True``, collect every optimal assignment and
-                store them as ``"all_labels"`` in the result metadata, each a
-                tuple of ``0/1`` ints (same encoding as ``labels``). If
-                ``False`` (default), only one optimal assignment is returned
-                and ``"all_labels"`` is absent from metadata.
+                store them as ``"all_labels"`` in the result metadata: a
+                node-indexed ``uint8`` ndarray of shape ``(n_optima, n_nodes)``
+                with 0/1 entries (same encoding as ``labels``). If ``False``
+                (default), only one optimal assignment is returned and
+                ``"all_labels"`` is absent from metadata.
+            max_optima: Maximum number of optimal assignments to materialize
+                when ``enumerate_all`` is ``True``.  ``None`` means no cap.
+                Ignored when ``enumerate_all`` is ``False``.
 
         Returns:
             An :class:`~archimono.assignment.solvers.base.AssignmentResult` with the
             optimal assignment, cut value, and solver metadata.
+
+        Raises:
+            ValueError: If the number of optima exceeds ``max_optima`` during
+                enumeration.
         """
         _validation.validate_binary_species_problem(graph, species)
 
         target_composition = self._target_composition(graph.number_of_nodes(), n_b)
         candidate = self._select_order(graph)
-        all_labels_int, cut_value, dp_metadata = _solve_frontier_dp(
+        all_labels_arr, cut_value, dp_metadata = _solve_frontier_dp(
             graph=graph,
             order=candidate.order,
             n_b=target_composition[1],
             enumerate_all=enumerate_all,
+            max_optima=max_optima if enumerate_all else None,
         )
-        labels = all_labels_int[0]
-        n_frustrated = sum(
-            1 for u, v in graph.edges() if labels[int(u)] == labels[int(v)]
-        )
+        labels = tuple(int(x) for x in all_labels_arr[0])
+        n_frustrated = _scoring.count_frustrated_edges(graph, labels)
         species_tuple = tuple(species)
 
         extra: dict[str, object] = {}
         if enumerate_all:
-            # 0/1 int tuples (same encoding as ``labels``) so consumers such as
-            # certification.write_case_json can pack them directly; the
-            # species mapping is recorded separately in ``label_mapping``.
-            extra["all_labels"] = [tuple(assignment) for assignment in all_labels_int]
+            # Node-indexed uint8 array (rows are 0/1 assignments, same encoding
+            # as ``labels``) so consumers such as certification.write_case_json
+            # can pack them directly; the species mapping is recorded separately
+            # in ``label_mapping``.
+            extra["all_labels"] = all_labels_arr
 
         return base.AssignmentResult(
             labels=labels,
@@ -157,117 +137,12 @@ class _FrontierDPBase(base.AssignmentSolver):
         )
 
 
-class FrontierExactSolverNatural(_FrontierDPBase):
-    """Frontier DP solver using plain natural (sorted-node-id) ordering.
-
-    Processes vertices in ascending node-ID order with no candidate
-    evaluation overhead. Useful as a baseline or when the graph's natural
-    numbering already reflects a good sweep direction.
-    """
-
-    def _select_order(self, graph: nx.Graph[int]) -> _OrderCandidate:
-        """Return the natural ascending node ordering.
-
-        Args:
-            graph: The input graph.
-
-        Returns:
-            An :class:`_OrderCandidate` for the natural ordering.
-        """
-        order = tuple(sorted(int(n) for n in graph.nodes()))
-        stats = _frontier_stats(graph, order)
-        return _OrderCandidate(
-            name="natural",
-            order=order,
-            max_frontier_size=stats.max_frontier_size,
-            dp_cost=stats.dp_cost,
-        )
-
-
-class FrontierExactSolver(_FrontierDPBase):
-    """Frontier DP solver using geometric sweep candidate selection.
-
-    Evaluates the natural order, its reverse, and up to four geometric
-    sweeps derived from node ``pos`` attributes when available. Picks the
-    candidate with the smallest maximum frontier size.
-    """
-
-    def _select_order(self, graph: nx.Graph[int]) -> _OrderCandidate:
-        """Return the best geometric-sweep candidate ordered by max frontier size.
-
-        Args:
-            graph: The input graph.
-
-        Returns:
-            The :class:`_OrderCandidate` with the smallest max frontier size.
-        """
-        return _best_geometric_order(graph)
-
-
-class FrontierExactSolverCK(_FrontierDPBase):
-    """Frontier DP solver that uses only Cuthill-McKee ordering.
-
-    Skips candidate evaluation to eliminate overhead. Useful when graph
-    structure is known to suit bandwidth-minimising orders.
-    """
-
-    def _select_order(self, graph: nx.Graph[int]) -> _OrderCandidate:
-        """Return the Cuthill-McKee ordering candidate.
-
-        Args:
-            graph: The input graph.
-
-        Returns:
-            An :class:`_OrderCandidate` for the Cuthill-McKee ordering.
-        """
-        order = tuple(int(n) for n in _cuthill_mckee_ordering(graph))
-        stats = _frontier_stats(graph, order)
-        return _OrderCandidate(
-            name="cuthill_mckee",
-            order=order,
-            max_frontier_size=stats.max_frontier_size,
-            dp_cost=stats.dp_cost,
-        )
-
-
-class FrontierExactSolverGreedy(_FrontierDPBase):
-    """Frontier DP solver that uses only greedy min-degree ordering.
-
-    Skips candidate evaluation to eliminate overhead. Tends to outperform
-    geometric sweeps on dense or irregular graphs.
-    """
-
-    def _select_order(self, graph: nx.Graph[int]) -> _OrderCandidate:
-        """Return the greedy minimum-degree ordering candidate.
-
-        Args:
-            graph: The input graph.
-
-        Returns:
-            An :class:`_OrderCandidate` for the greedy min-degree ordering.
-        """
-        order = _greedy_min_degree_order(graph)
-        stats = _frontier_stats(graph, order)
-        return _OrderCandidate(
-            name="greedy_min_degree",
-            order=order,
-            max_frontier_size=stats.max_frontier_size,
-            dp_cost=stats.dp_cost,
-        )
-
-
 def _best_geometric_order(graph: nx.Graph[int]) -> _OrderCandidate:
     """Choose a vertex ordering from geometric sweep candidates.
 
     Evaluates the natural order, its reverse, and geometric sweeps derived
     from node ``pos`` attributes when available.  Returns the candidate with
     the smallest maximum frontier size (ties broken by name).
-
-    Args:
-        graph: The input graph.
-
-    Returns:
-        The :class:`_OrderCandidate` with the smallest max frontier size.
     """
     candidates: list[tuple[str, tuple[int, ...]]] = []
     seen_orders: set[tuple[int, ...]] = set()
@@ -368,12 +243,6 @@ def _greedy_min_degree_order(graph: nx.Graph[int]) -> tuple[int, ...]:
     At each step selects the unprocessed node with the fewest edges into the
     remaining unprocessed subgraph. This is a standard treewidth heuristic
     and tends to produce small frontiers on irregular sparse graphs.
-
-    Args:
-        graph: The input graph (not modified).
-
-    Returns:
-        A tuple of node IDs in elimination order.
     """
     remaining: set[int] = {int(n) for n in graph.nodes()}
     degree: dict[int, int] = {
@@ -392,23 +261,15 @@ def _greedy_min_degree_order(graph: nx.Graph[int]) -> tuple[int, ...]:
     return tuple(order)
 
 
-def _frontier_stats(
+def _frontier_sizes(
     graph: nx.Graph[int],
     order: Sequence[int],
-) -> _FrontierStats:
-    """Return frontier statistics for one ordering.
+) -> tuple[int, ...]:
+    """Return the per-step frontier sizes for one ordering.
 
-    Computes the maximum frontier size and the DP-cost estimate
-    ``sum(2**frontier_size_at_step)``, which is proportional to the total
-    number of DP states explored.
-
-    Args:
-        graph: The input graph.
-        order: Vertex processing order.
-
-    Returns:
-        A :class:`_FrontierStats` named tuple with ``max_frontier_size``
-        (int) and ``dp_cost`` (float).
+    The frontier size at step ``t`` is the number of already-processed
+    vertices still relevant to edges at or beyond step ``t``, plus the
+    current vertex when it has unprocessed neighbors.
     """
     position = {int(node): index for index, node in enumerate(order)}
     last_neighbor_position = {
@@ -419,8 +280,7 @@ def _frontier_stats(
         for node in order
     }
 
-    max_frontier_size = 0
-    dp_cost = 0.0
+    sizes: list[int] = []
     for step in range(len(order)):
         active_before_size = sum(
             1
@@ -431,132 +291,109 @@ def _frontier_stats(
             position[int(neighbor)] > step
             for neighbor in graph.neighbors(order[step])
         )
-        frontier_size = active_before_size + int(has_future_neighbor)
-        if frontier_size > max_frontier_size:
-            max_frontier_size = frontier_size
-        dp_cost += 2.0 ** frontier_size
-    return _FrontierStats(max_frontier_size=max_frontier_size, dp_cost=dp_cost)
+        sizes.append(active_before_size + int(has_future_neighbor))
+    return tuple(sizes)
 
 
-def _backtrack_all(
-    parent_maps: list[dict[StateKey, list[tuple[StateKey, int]]]],
-    final_states: list[StateKey],
+def _frontier_stats(
+    graph: nx.Graph[int],
+    order: Sequence[int],
+) -> _FrontierStats:
+    """Return frontier statistics for one ordering.
+
+    Computes the maximum frontier size and the DP-cost estimate
+    ``sum(2**frontier_size_at_step)``, which is proportional to the total
+    number of DP states explored.
+    """
+    sizes = _frontier_sizes(graph, order)
+    return _FrontierStats(
+        max_frontier_size=max(sizes, default=0),
+        dp_cost=sum(2.0**size for size in sizes),
+    )
+
+
+def _stack_optima_rows(
+    rows: list[npt.NDArray[np.uint8]],
     n_nodes: int,
-) -> list[tuple[int, ...]]:
-    """Enumerate all optimal assignments by DFS through the parent DAG.
+) -> npt.NDArray[np.uint8]:
+    """Stack accumulated optimal-assignment rows into a 2-D ``uint8`` array.
+
+    Returns:
+        A ``(len(rows), n_nodes)`` ``uint8`` array, or a ``(0, n_nodes)`` array
+        when ``rows`` is empty.
+    """
+    if not rows:
+        return np.empty((0, n_nodes), dtype=np.uint8)
+    return np.stack(rows)
+
+
+def _enumerate_from_parent_dag(
+    parent_maps: list[dict[StateKey, list[tuple[StateKey, int]]]],
+    optimal_finals: list[StateKey],
+    n_nodes: int,
+    max_optima: int | None = None,
+) -> npt.NDArray[np.uint8]:
+    """Enumerate optimal assignments by DFS through the stored parent DAG.
+
+    Backward phase (consumer): recovers the witness assignments consistent with
+    the forward DP's ``best_cut`` by walking parent pointers. It never
+    re-optimizes; the forward pass is the single source of truth for the cut
+    value. Completed assignments are accumulated directly as ``uint8`` rows —
+    no intermediate list of Python int-tuples is built.
 
     Args:
         parent_maps: Per-step maps from each DP state to its list of
             ``(previous_state, label)`` parent edges.
-        final_states: All final DP states that achieved the optimal cut value.
-        n_nodes: Total number of vertices (length of each returned assignment).
+        optimal_finals: All final DP states that achieved the optimal cut value.
+        n_nodes: Total number of vertices (width of each returned assignment).
+        max_optima: Maximum number of assignments to materialize.  ``None``
+            means no cap.
 
     Returns:
-        All distinct per-step label sequences that achieve the optimal cut.
-        Each element is a tuple of integer labels indexed by processing order.
+        A 2-D ``uint8`` array of shape ``(n_optima, n_nodes)`` whose columns are
+        indexed by processing order; each row is one optimal assignment.
+
+    Raises:
+        ValueError: If the number of materialized paths exceeds ``max_optima``.
     """
-    results: list[tuple[int, ...]] = []
-    buffer: list[int] = [0] * n_nodes
+    rows: list[npt.NDArray[np.uint8]] = []
+    buffer: npt.NDArray[np.uint8] = np.zeros(n_nodes, dtype=np.uint8)
 
-    def _dfs(step: int, state: StateKey) -> None:
-        if step < 0:
-            results.append(tuple(buffer))
-            return
-        for prev_state, label in parent_maps[step][state]:
-            buffer[step] = label
-            _dfs(step - 1, prev_state)
-
-    for final_state in final_states:
-        _dfs(n_nodes - 1, final_state)
-    return results
-
-
-def _reconstruct_two_pass(
-    *,
-    dp_layers: list[dict[StateKey, float]],
-    after_sources: list[tuple[int | None, ...]],
-    earlier_neighbors: list[tuple[tuple[int, float], ...]],
-    n_b: int,
-    n_nodes: int,
-    best_cut: float,
-    enumerate_all: bool,
-) -> list[tuple[int, ...]]:
-    """Reconstruct optimal assignments by backward scan through score layers.
-
-    Used by the two-pass path (``n_nodes > _TWO_PASS_THRESHOLD``) to avoid
-    storing parent maps.  At each backward step the function recomputes which
-    ``(prev_state, label)`` transitions produced the known next state, reading
-    the delta from ``earlier_neighbors`` and the new frontier mask from
-    ``after_sources``.
-
-    Args:
-        dp_layers: Score-only DP layers from the forward pass; ``dp_layers[t]``
-            is the dict of states reachable after processing step ``t``.
-        after_sources: Pre-computed frontier source indices per step.
-        earlier_neighbors: Pre-computed earlier-neighbor ``(index, weight)``
-            pairs per step.
-        n_b: Target count of label-1 assignments.
-        n_nodes: Total number of vertices.
-        best_cut: Optimal cut value from the forward pass.
-        enumerate_all: If ``True``, collect every optimal assignment; if
-            ``False``, return the first one found.
-
-    Returns:
-        All (or one) optimal per-step label sequences, each a tuple of
-        integers indexed by processing order.
-    """
-    final_layer = dp_layers[-1]
-    if enumerate_all:
-        optimal_final_states = [
-            state for state, score in final_layer.items()
-            if state[1] == n_b and score == best_cut
-        ]
-    else:
-        optimal_final_states = [
-            next(
-                state for state, score in final_layer.items()
-                if state[1] == n_b and score == best_cut
-            )
-        ]
-
-    results: list[tuple[int, ...]] = []
-    buffer: list[int] = [0] * n_nodes
-
-    def _dfs(step: int, current_state: StateKey, target_score: float) -> None:
-        if step < 0:
-            results.append(tuple(buffer))
-            return
-        prev_layer = dp_layers[step - 1] if step > 0 else {(0, 0): 0.0}
-        current_bitmask, current_ones = current_state
-        for prev_state, prev_score in prev_layer.items():
-            prev_bitmask, prev_ones = prev_state
-            for label in (0, 1):
-                if prev_ones + label != current_ones:
-                    continue
-                next_bitmask = 0
-                for i, source in enumerate(after_sources[step]):
-                    bit = label if source is None else (prev_bitmask >> source) & 1
-                    next_bitmask |= bit << i
-                if next_bitmask != current_bitmask:
-                    continue
-                delta = sum(
-                    w for idx, w in earlier_neighbors[step]
-                    if ((prev_bitmask >> idx) & 1) != label
+    # Explicit-stack DFS: recursion depth would equal n_nodes, which overflows
+    # the interpreter stack on the large thin graphs the frontier DP targets.
+    # stack[i] iterates the parent edges consumed at step n_nodes - 1 - i.
+    for final_state in optimal_finals:
+        if n_nodes == 0:
+            rows.append(buffer.copy())
+            if max_optima is not None and len(rows) > max_optima:
+                raise ValueError(
+                    f"Enumeration exceeded max_optima={max_optima}. "
+                    f"Raise max_optima to materialize more optimal "
+                    f"assignments."
                 )
-                if abs(prev_score + delta - target_score) < 1e-9:
-                    buffer[step] = label
-                    _dfs(step - 1, prev_state, prev_score)
-                    if not enumerate_all and results:
-                        return
-            if not enumerate_all and results:
-                return
-
-    for final_state in optimal_final_states:
-        _dfs(n_nodes - 1, final_state, final_layer[final_state])
-        if not enumerate_all and results:
-            break
-
-    return results
+            continue
+        stack: list[Iterator[tuple[StateKey, int]]] = [
+            iter(parent_maps[n_nodes - 1][final_state])
+        ]
+        while stack:
+            step = n_nodes - len(stack)
+            entry = next(stack[-1], None)
+            if entry is None:
+                stack.pop()
+                continue
+            prev_state, label = entry
+            buffer[step] = label
+            if step == 0:
+                rows.append(buffer.copy())
+                if max_optima is not None and len(rows) > max_optima:
+                    raise ValueError(
+                        f"Enumeration exceeded max_optima={max_optima}. "
+                        f"Raise max_optima to materialize more optimal "
+                        f"assignments."
+                    )
+            else:
+                stack.append(iter(parent_maps[step - 1][prev_state]))
+    return _stack_optima_rows(rows, n_nodes)
 
 
 _FrontierTables = tuple[
@@ -570,10 +407,6 @@ def _build_frontier_tables(
     order: Sequence[int],
 ) -> _FrontierTables:
     """Pre-compute per-step frontier source and neighbor tables.
-
-    Args:
-        graph: The interaction graph with optional ``weight`` edge attributes.
-        order: Vertex processing order (a permutation of all node IDs).
 
     Returns:
         A pair ``(after_sources, earlier_neighbors)`` where
@@ -632,7 +465,7 @@ def _build_frontier_tables(
     return after_sources, earlier_neighbors
 
 
-def _forward_value_only(
+def _compute_value_forward(
     after_sources: list[tuple[int | None, ...]],
     earlier_neighbors: list[tuple[tuple[int, float], ...]],
     n_nodes: int,
@@ -640,15 +473,9 @@ def _forward_value_only(
 ) -> tuple[float, dict[str, int]]:
     """Forward DP pass returning only the optimal cut value.
 
-    Single rolling layer — O(2^k) peak memory regardless of ``n_nodes``.
-
-    Args:
-        after_sources: Per-step frontier source indices from
-            :func:`_build_frontier_tables`.
-        earlier_neighbors: Per-step earlier-neighbor ``(index, weight)``
-            pairs from :func:`_build_frontier_tables`.
-        n_nodes: Total number of vertices.
-        n_b: Target count of label-1 assignments.
+    Forward phase (source of truth): computes ``best_cut`` over all partial
+    assignments represented by each frontier state. Keeps two rolling layers,
+    each holding at most ``2^k × (n_b + 1)`` states.
 
     Returns:
         A pair ``(best_cut, metadata)``.
@@ -660,6 +487,10 @@ def _forward_value_only(
     n_states_explored = 1
     max_states_retained = 1
 
+    # NOTE: this transition loop is intentionally forked from
+    # _compute_value_with_parents (which additionally records parent edges).
+    # Merging them behind a callback would slow the hottest loop in the
+    # package; any pruning or delta change here must be mirrored there.
     for step in range(n_nodes):
         next_dp: dict[StateKey, float] = {}
         remaining_vertices = n_nodes - step - 1
@@ -704,112 +535,38 @@ def _forward_value_only(
     }
 
 
-def _forward_two_pass(
+def _compute_value_with_parents(
     after_sources: list[tuple[int | None, ...]],
     earlier_neighbors: list[tuple[tuple[int, float], ...]],
     n_nodes: int,
     n_b: int,
     enumerate_all: bool,
-) -> tuple[list[tuple[int, ...]], float, dict[str, int]]:
-    """Forward DP pass storing score layers, then backward reconstruction.
+) -> tuple[
+    float,
+    list[dict[StateKey, list[tuple[StateKey, int]]]],
+    list[StateKey],
+    dict[str, int],
+]:
+    """Forward DP pass computing ``best_cut`` and storing parent pointers.
 
-    Avoids parent-map memory by storing only float scores per layer and
-    re-deriving transitions during backward DFS.
+    Forward phase (source of truth): computes ``best_cut`` over all partial
+    assignments while recording, per step, the ``(prev_state, label)`` parents
+    of each retained state. It does **not** backtrack; assignment recovery is a
+    separate consumer. Stores one parent-pointer list per state per step; this
+    is the sole reconstruction forward pass for all assignment-returning solves.
 
     Args:
         after_sources: Per-step frontier source indices.
         earlier_neighbors: Per-step earlier-neighbor ``(index, weight)`` pairs.
         n_nodes: Total number of vertices.
         n_b: Target count of label-1 assignments.
-        enumerate_all: If ``True``, collect all optimal assignments.
+        enumerate_all: If ``True``, store tie parents so every optimal path can
+            later be enumerated, and return every optimal final state.
 
     Returns:
-        A triple ``(assignments_in_order, best_cut, metadata)``.
-
-    Raises:
-        RuntimeError: If the DP exhausts all states or finds no valid assignment.
-    """
-    dp_layers: list[dict[StateKey, float]] = []
-    dp: dict[StateKey, float] = {(0, 0): 0.0}
-    n_states_explored = 1
-    max_states_retained = 1
-
-    for step in range(n_nodes):
-        next_dp: dict[StateKey, float] = {}
-        remaining_vertices = n_nodes - step - 1
-        for state, score in dp.items():
-            labels_bitmask, n_ones_used = state
-            for label in (0, 1):
-                next_ones = n_ones_used + label
-                if next_ones > n_b:
-                    continue
-                if next_ones + remaining_vertices < n_b:
-                    continue
-                delta = sum(
-                    w for idx, w in earlier_neighbors[step]
-                    if ((labels_bitmask >> idx) & 1) != label
-                )
-                next_bitmask = 0
-                for i, source in enumerate(after_sources[step]):
-                    bit = label if source is None else (
-                        (labels_bitmask >> source) & 1
-                    )
-                    next_bitmask |= bit << i
-                next_state: StateKey = (next_bitmask, next_ones)
-                next_score = score + delta
-                if next_score > next_dp.get(next_state, -inf):
-                    next_dp[next_state] = next_score
-        if not next_dp:
-            raise RuntimeError(
-                f"{__name__}: frontier DP exhausted all states unexpectedly."
-            )
-        dp_layers.append(next_dp)
-        dp = next_dp
-        n_states_explored += len(dp)
-        max_states_retained = max(max_states_retained, len(dp))
-
-    final_candidates = [(s, sc) for s, sc in dp.items() if s[1] == n_b]
-    if not final_candidates:
-        raise RuntimeError(
-            f"{__name__}: no assignment found at target composition n_b={n_b}."
-        )
-    best_cut = max(sc for _, sc in final_candidates)
-    assignments = _reconstruct_two_pass(
-        dp_layers=dp_layers,
-        after_sources=after_sources,
-        earlier_neighbors=earlier_neighbors,
-        n_b=n_b,
-        n_nodes=n_nodes,
-        best_cut=best_cut,
-        enumerate_all=enumerate_all,
-    )
-    return assignments, best_cut, {
-        "n_states_explored": n_states_explored,
-        "max_states_retained": max_states_retained,
-    }
-
-
-def _forward_single_pass(
-    after_sources: list[tuple[int | None, ...]],
-    earlier_neighbors: list[tuple[tuple[int, float], ...]],
-    n_nodes: int,
-    n_b: int,
-    enumerate_all: bool,
-) -> tuple[list[tuple[int, ...]], float, dict[str, int]]:
-    """Forward DP pass storing parent maps for direct backtracking.
-
-    Stores one parent-pointer list per state per step. Used when ``n_nodes``
-    is small enough that the O(n * 2^k) parent-map memory is acceptable.
-
-    Args:
-        after_sources: Per-step frontier source indices.
-        earlier_neighbors: Per-step earlier-neighbor ``(index, weight)`` pairs.
-        n_nodes: Total number of vertices.
-        n_b: Target count of label-1 assignments.
-        enumerate_all: If ``True``, collect all optimal assignments.
-
-    Returns:
-        A triple ``(assignments_in_order, best_cut, metadata)``.
+        A quadruple ``(best_cut, parent_maps, optimal_finals, metadata)`` where
+        ``optimal_finals`` lists the final DP states achieving ``best_cut`` (all
+        of them when ``enumerate_all``; otherwise the first one).
 
     Raises:
         RuntimeError: If the DP exhausts all states or finds no valid assignment.
@@ -819,6 +576,9 @@ def _forward_single_pass(
     n_states_explored = 1
     max_states_retained = 1
 
+    # NOTE: this transition loop is intentionally forked from
+    # _compute_value_forward (the value-only path without parent bookkeeping).
+    # Any pruning or delta change here must be mirrored there.
     for step in range(n_nodes):
         next_dp: dict[StateKey, float] = {}
         parent_map: dict[StateKey, list[tuple[StateKey, int]]] = {}
@@ -868,8 +628,7 @@ def _forward_single_pass(
         optimal_finals = [s for s, sc in final_candidates if sc == best_cut]
     else:
         optimal_finals = [next(s for s, sc in final_candidates if sc == best_cut)]
-    assignments = _backtrack_all(parent_maps, optimal_finals, n_nodes)
-    return assignments, best_cut, {
+    return best_cut, parent_maps, optimal_finals, {
         "n_states_explored": n_states_explored,
         "max_states_retained": max_states_retained,
     }
@@ -882,7 +641,8 @@ def _solve_frontier_dp(
     n_b: int,
     enumerate_all: bool = False,
     value_only: bool = False,
-) -> tuple[list[base.AssignmentLabels], float, dict[str, int]]:
+    max_optima: int | None = None,
+) -> tuple[npt.NDArray[np.uint8], float, dict[str, int]]:
     """Dispatch a fixed-composition MAX-CUT solve to the appropriate forward pass.
 
     Args:
@@ -891,16 +651,20 @@ def _solve_frontier_dp(
         n_b: Target count of label-1 assignments.
         enumerate_all: If ``True``, backtrack all optimal paths. Ignored when
             ``value_only=True``.
-        value_only: If ``True``, return only the cut value (empty label list).
-            Uses a single rolling layer — O(2^k) peak memory.
+        value_only: If ``True``, return only the cut value (no labels). Keeps
+            two rolling layers, each holding at most ``2^k × (n_b + 1)`` states.
+        max_optima: Maximum number of optimal assignments to materialize.
+            ``None`` means no cap. Only meaningful when ``enumerate_all=True``.
 
     Returns:
-        A triple ``(all_labels, best_cut, metadata)``. ``all_labels`` is empty
-        when ``value_only=True``.
+        A triple ``(all_labels, best_cut, metadata)`` where ``all_labels`` is a
+        node-indexed ``uint8`` array of shape ``(n_optima, n_nodes)`` whose rows
+        are 0/1 assignments. It has zero rows when ``value_only=True``.
 
     Raises:
         ValueError: If ``order`` is not a valid permutation of the graph nodes,
-            or if both ``value_only`` and ``enumerate_all`` are ``True``.
+            or if both ``value_only`` and ``enumerate_all`` are ``True``, or if
+            the number of optima exceeds ``max_optima``.
         RuntimeError: If the DP unexpectedly exhausts all states.
     """
     if value_only and enumerate_all:
@@ -916,26 +680,25 @@ def _solve_frontier_dp(
     after_sources, earlier_neighbors = _build_frontier_tables(graph, order)
 
     if value_only:
-        best_cut, metadata = _forward_value_only(
+        best_cut, metadata = _compute_value_forward(
             after_sources, earlier_neighbors, n_nodes, n_b
         )
-        return [], best_cut, metadata
+        return np.empty((0, n_nodes), dtype=np.uint8), best_cut, metadata
 
-    if n_nodes > _TWO_PASS_THRESHOLD:
-        assignments, best_cut, metadata = _forward_two_pass(
-            after_sources, earlier_neighbors, n_nodes, n_b, enumerate_all
-        )
-    else:
-        assignments, best_cut, metadata = _forward_single_pass(
-            after_sources, earlier_neighbors, n_nodes, n_b, enumerate_all
-        )
+    best_cut, parent_maps, optimal_finals, metadata = _compute_value_with_parents(
+        after_sources, earlier_neighbors, n_nodes, n_b, enumerate_all
+    )
+    optima_in_order = _enumerate_from_parent_dag(
+        parent_maps, optimal_finals, n_nodes, max_optima=max_optima
+    )
 
-    all_labels_by_node: list[base.AssignmentLabels] = []
-    for assigned_in_order in assignments:
-        labels_by_node = [0] * n_nodes
-        for step, node in enumerate(order):
-            labels_by_node[int(node)] = assigned_in_order[step]
-        all_labels_by_node.append(tuple(labels_by_node))
+    # Remap columns from processing order to node id in one vectorized step:
+    # ``all_labels_by_node[:, order[step]] = optima_in_order[:, step]``.
+    order_index = np.fromiter(
+        (int(node) for node in order), dtype=np.intp, count=n_nodes
+    )
+    all_labels_by_node: npt.NDArray[np.uint8] = np.empty_like(optima_in_order)
+    all_labels_by_node[:, order_index] = optima_in_order
 
     return all_labels_by_node, best_cut, metadata
 
@@ -948,8 +711,8 @@ def compute_max_cut_value(
 ) -> float:
     """Return the exact fixed-composition MAX-CUT value without labels.
 
-    Uses a single rolling DP layer — O(2^k) peak memory where k is the maximum
-    frontier width, independent of the number of vertices.
+    Keeps two rolling DP layers, each holding at most ``2^k × (n_b + 1)`` states,
+    where k is the maximum frontier width.
 
     Args:
         graph: The interaction graph with optional ``weight`` edge attributes.
@@ -961,35 +724,13 @@ def compute_max_cut_value(
             :func:`compute_frontier_width` for descriptions. Use
             :func:`select_heuristic` to choose the best ordering before calling.
 
-    Returns:
-        The optimal cut value k*.
-
     Raises:
         ValueError: If ``n_b`` is out of range or ``heuristic`` is not recognised.
     """
-    n_nodes = graph.number_of_nodes()
-    if n_b is None:
-        n_b = n_nodes // 2
-    if not isinstance(n_b, int) or isinstance(n_b, bool):
-        raise ValueError("n_b must be an integer count of 1 labels.")
-    if n_b < 0 or n_b > n_nodes:
-        raise ValueError(f"n_b must satisfy 0 <= n_b <= {n_nodes}.")
-    if heuristic not in _FRONTIER_HEURISTICS:
-        raise ValueError(
-            f"Unknown heuristic {heuristic!r}. "
-            f"Expected one of: {sorted(_FRONTIER_HEURISTICS)!r}."
-        )
-    if heuristic == "geometric":
-        order: tuple[int, ...] = _best_geometric_order(graph).order
-    elif heuristic == "natural":
-        order = tuple(sorted(int(n) for n in graph.nodes()))
-    elif heuristic == "ck":
-        order = tuple(int(n) for n in _cuthill_mckee_ordering(graph))
-    else:  # greedy
-        order = _greedy_min_degree_order(graph)
+    _, n_b = _validation.resolve_fixed_composition(graph.number_of_nodes(), n_b)
     _, best_cut, _ = _solve_frontier_dp(
         graph=graph,
-        order=order,
+        order=_order_for_heuristic(graph, heuristic),
         n_b=n_b,
         value_only=True,
     )
@@ -1003,22 +744,15 @@ _FRONTIER_HEURISTICS: frozenset[str] = frozenset(
 _SELECT_HEURISTIC_PRIORITY: tuple[str, ...] = ("geometric", "ck", "greedy")
 
 
-def compute_frontier_width(graph: nx.Graph[int], heuristic: str) -> int:
-    """Return the maximum frontier width for a given vertex-ordering heuristic.
-
-    The maximum frontier width *k* is the peak bitmask width during DP
-    traversal.  Memory scales as O(2^k), so minimising *k* is key to
-    avoiding out-of-memory errors.
+def _order_for_heuristic(
+    graph: nx.Graph[int],
+    heuristic: str,
+) -> tuple[int, ...]:
+    """Return the vertex ordering produced by an ordering heuristic.
 
     Args:
         graph: The input graph.  Nodes must be integers or castable to int.
-        heuristic: Ordering strategy.  One of ``"natural"`` (ascending
-            node-ID), ``"ck"`` (Cuthill-McKee), ``"greedy"`` (greedy
-            min-degree elimination), or ``"geometric"`` (best-of-N
-            geometric sweep).
-
-    Returns:
-        Maximum frontier width k.
+        heuristic: Ordering strategy; see :func:`compute_frontier_width`.
 
     Raises:
         ValueError: If *heuristic* is not a recognised value.
@@ -1029,34 +763,161 @@ def compute_frontier_width(graph: nx.Graph[int], heuristic: str) -> int:
             f"Expected one of: {sorted(_FRONTIER_HEURISTICS)!r}."
         )
     if heuristic == "geometric":
-        return _best_geometric_order(graph).max_frontier_size
+        return _best_geometric_order(graph).order
     if heuristic == "natural":
-        order: tuple[int, ...] = tuple(sorted(int(n) for n in graph.nodes()))
-    elif heuristic == "ck":
-        order = tuple(int(n) for n in _cuthill_mckee_ordering(graph))
-    elif heuristic == "greedy":
-        order = _greedy_min_degree_order(graph)
-    else:
-        raise AssertionError(f"unreachable: {heuristic!r}")
-    return _frontier_stats(graph, order).max_frontier_size
+        return tuple(sorted(int(n) for n in graph.nodes()))
+    if heuristic == "ck":
+        return tuple(int(n) for n in _cuthill_mckee_ordering(graph))
+    if heuristic == "greedy":
+        return _greedy_min_degree_order(graph)
+    raise AssertionError(f"unreachable: {heuristic!r}")
 
 
-def estimate_peak_memory_bytes(k: int, n: int) -> int:
-    """Estimate peak memory for a frontier DP solve.
+def compute_frontier_sizes(
+    graph: nx.Graph[int],
+    heuristic: str,
+) -> tuple[int, ...]:
+    """Return the per-step frontier-size sequence for an ordering heuristic.
 
-    Uses the formula ``2 × 2^k × (n // 2 + 1) × 144`` bytes, where 2 accounts
-    for two coexisting DP layers during each step transition, ``2^k`` is the
-    bitmask state count, ``(n // 2 + 1)`` is the label-count multiplicity, and
-    144 bytes is the estimated cost per Python dict entry.
+    The sequence has one entry per vertex in processing order; its maximum is
+    the frontier width *k* (see :func:`compute_frontier_width`) and
+    ``sum(2**size)`` over it is the DP cost (see :func:`compute_dp_cost`).
+    It is the input to the reachability-aware value-only memory estimator
+    :func:`estimate_peak_memory_bytes`, and is a cheap graph-structural
+    computation — no exponential DP runs.
 
     Args:
-        k: Maximum frontier width.
-        n: Number of vertices in the graph.
+        graph: The input graph.  Nodes must be integers or castable to int.
+        heuristic: Ordering strategy; see :func:`compute_frontier_width`.
 
-    Returns:
-        Estimated peak memory in bytes.
+    Raises:
+        ValueError: If *heuristic* is not a recognised value.
     """
-    return 2 * (1 << k) * (n // 2 + 1) * 144
+    return _frontier_sizes(graph, _order_for_heuristic(graph, heuristic))
+
+
+def _order_stats(graph: nx.Graph[int], heuristic: str) -> _FrontierStats:
+    """Return the frontier-width and DP-cost stats for an ordering heuristic.
+
+    Shared dispatch for :func:`compute_frontier_width` and
+    :func:`compute_dp_cost`, which each return one field of the same
+    underlying computation.
+
+    Args:
+        graph: The input graph.  Nodes must be integers or castable to int.
+        heuristic: Ordering strategy; see :func:`compute_frontier_width`.
+
+    Raises:
+        ValueError: If *heuristic* is not a recognised value.
+    """
+    return _frontier_stats(graph, _order_for_heuristic(graph, heuristic))
+
+
+def compute_frontier_width(graph: nx.Graph[int], heuristic: str) -> int:
+    """Return the maximum frontier width for a given vertex-ordering heuristic.
+
+    The maximum frontier width *k* is the peak bitmask width during DP
+    traversal.  Each DP layer holds at most ``2^k × (n_b + 1)`` states, so
+    minimising *k* is key to avoiding out-of-memory errors.
+
+    Args:
+        graph: The input graph.  Nodes must be integers or castable to int.
+        heuristic: Ordering strategy.  One of ``"natural"`` (ascending
+            node-ID), ``"ck"`` (Cuthill-McKee), ``"greedy"`` (greedy
+            min-degree elimination), or ``"geometric"`` (best-of-N
+            geometric sweep).
+
+    Raises:
+        ValueError: If *heuristic* is not a recognised value.
+    """
+    return _order_stats(graph, heuristic).max_frontier_size
+
+
+def compute_dp_cost(graph: nx.Graph[int], heuristic: str) -> float:
+    """Return the DP-cost estimate for a given vertex-ordering heuristic.
+
+    The DP cost ``Σ_steps 2^frontier_size`` is the summed state count over all
+    DP layers.  It is the natural memory predictor for the reconstruction path
+    (see :func:`estimate_reconstruct_memory_bytes`), which retains a parent
+    map per layer, and is computed for free during vertex-order selection —
+    before the exponential DP runs.
+
+    Args:
+        graph: The input graph.  Nodes must be integers or castable to int.
+        heuristic: Ordering strategy; see :func:`compute_frontier_width`.
+
+    Raises:
+        ValueError: If *heuristic* is not a recognised value.
+    """
+    return _order_stats(graph, heuristic).dp_cost
+
+
+def estimate_peak_memory_bytes(frontier_sizes: Sequence[int], n_b: int) -> int:
+    """Estimate peak memory in bytes for a frontier DP value-only solve.
+
+    A DP state after step ``t`` is a ``(frontier_bitmask, n_ones)`` pair, and the
+    composition pruning bounds the valid ``n_ones`` range per bitmask popcount
+    ``p``, so the layer holds at most ``sum over p of C(width_t, p) * |valid
+    n_ones range|`` states.  The estimate is ``2 × max_t(reachable_t) × 160``
+    bytes: 2 for the two coexisting rolling layers during a step transition, and
+    160 bytes per retained entry.
+
+    The reachable count never falls below any layer's true retained size
+    (every counted constraint is a necessary condition for a state to exist),
+    and never exceeds the old blanket bound, so at a fixed budget this can
+    only admit cases the blanket formula over-conservatively rejected.
+
+    Args:
+        frontier_sizes: Per-step frontier sizes for the chosen vertex
+            ordering (see :func:`compute_frontier_sizes`); one entry per
+            vertex in processing order.
+        n_b: Target count of label-1 assignments.
+    """
+    n = len(frontier_sizes)
+    max_reachable = 1
+    for step, width in enumerate(frontier_sizes):
+        processed = step + 1
+        remaining = n - processed
+        reachable = 0
+        for popcount in range(width + 1):
+            lowest_ones = max(popcount, n_b - remaining)
+            highest_ones = min(n_b, popcount + processed - width)
+            if highest_ones >= lowest_ones:
+                reachable += comb(width, popcount) * (
+                    highest_ones - lowest_ones + 1
+                )
+        max_reachable = max(max_reachable, reachable)
+    return 2 * max_reachable * 160
+
+
+def estimate_reconstruct_memory_bytes(dp_cost: float, n: int) -> int:
+    """Estimate peak memory in bytes for a frontier-DP reconstruction solve.
+
+    Unlike :func:`estimate_peak_memory_bytes`, which bounds the value-only
+    path's two rolling DP layers, the reconstruction path (``solve()`` /
+    :class:`FrontierExactSolver`) retains a parent-pointer map for *every* DP
+    layer, so its memory is a sum over layers.  The predictor is therefore
+    ``dp_cost = Σ_steps 2^frontier_size``, not the single-layer peak width ``k``.
+
+    This estimate covers DP-state dictionaries and parent-pointer maps
+    retained for reconstruction.  It does **not** cover the output array
+    (``all_labels``) produced by :func:`_enumerate_from_parent_dag`, whose
+    size is output-sensitive and can dominate on highly degenerate lattices
+    (e.g. balanced kagome at (3,3) and above).
+    Output size is bounded separately by the ``max_optima`` parameter on
+    :meth:`FrontierExactSolver.solve`.
+
+    Formula: ``2^3.9 × dp_cost^0.99 × n^1.2 × 1.5`` bytes, an empirical OLS fit
+    with a safety multiplier.  This is a pre-solve estimate, not a conservative
+    bound on every reconstruction solve.
+
+    Args:
+        dp_cost: Summed DP state cost ``Σ_steps 2^frontier_size`` for the
+            chosen vertex ordering (see :func:`compute_dp_cost`).  At least 1.
+        n: Number of vertices in the graph.
+    """
+    safety_multiplier = 1.5  # M: bare OLS fit underestimates ~half its sample.
+    return int((2**3.9) * (dp_cost**0.99) * (n**1.2) * safety_multiplier)
 
 
 def select_heuristic(graph: nx.Graph[int]) -> tuple[str, int]:
@@ -1065,9 +926,6 @@ def select_heuristic(graph: nx.Graph[int]) -> tuple[str, int]:
     Evaluates ``"geometric"``, ``"ck"``, and ``"greedy"`` heuristics. Geometric
     already subsumes natural as one of its sweep candidates. Ties are broken in
     the order geometric > ck > greedy.
-
-    Args:
-        graph: The input graph. Nodes must be integers or castable to int.
 
     Returns:
         A ``(heuristic_name, min_frontier_width)`` pair where

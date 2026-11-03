@@ -200,11 +200,7 @@ class AnnealingSolver(_heuristic_base.HeuristicAssignmentSolver):
             labels=tuple(best_labels),
             objective_value=best_cut_value,
             cut_value=cut_value,
-            n_frustrated=sum(
-                1
-                for u, v in graph.edges()
-                if best_labels[int(u)] == best_labels[int(v)]
-            ),
+            n_frustrated=_scoring.count_frustrated_edges(graph, best_labels),
             solver=self.__class__.__name__,
             metadata={
                 "species": tuple(species),

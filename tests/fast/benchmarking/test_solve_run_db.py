@@ -68,7 +68,6 @@ class TestOpenDb:
         conn.close()
 
     def test_returns_connection(self) -> None:
-        """open_db returns a sqlite3.Connection."""
         conn = open_db(":memory:")
         assert isinstance(conn, sqlite3.Connection)
         conn.close()
@@ -93,7 +92,6 @@ class TestInsertRun:
     """insert_run persists SolveRun records and supports roundtrip retrieval."""
 
     def test_insert_roundtrip(self) -> None:
-        """Inserting a run and querying it back yields the same field values."""
         conn = open_db(":memory:")
         run = _make_run()
         result = insert_run(conn, run)
@@ -124,13 +122,11 @@ class TestInsertRun:
         assert r.sweep_label == run.sweep_label
 
     def test_insert_returns_true(self) -> None:
-        """insert_run returns True when a new row is inserted."""
         conn = open_db(":memory:")
         run = _make_run(seed=1)
         assert insert_run(conn, run) is True
 
     def test_duplicate_returns_false(self) -> None:
-        """Inserting the same run twice returns False on the second call."""
         conn = open_db(":memory:")
         run = _make_run(seed=99)
         first = insert_run(conn, run)
@@ -151,7 +147,6 @@ class TestInsertRun:
         assert result is True
 
     def test_null_labels_roundtrip(self) -> None:
-        """A run with labels=None roundtrips correctly."""
         conn = open_db(":memory:")
         run = _make_run(
             labels=None, cut_value=None, cut_efficiency=None, n_frustrated=None
@@ -166,7 +161,6 @@ class TestInsertRun:
         assert runs[0].cut_value is None
 
     def test_sweep_label_roundtrip(self) -> None:
-        """sweep_label is persisted and retrieved correctly."""
         conn = open_db(":memory:")
         run = _make_run(sweep_label="fast", seed=101)
         insert_run(conn, run)
@@ -340,19 +334,16 @@ class TestSolveRunDB:
         return db
 
     def test_all_returns_all(self) -> None:
-        """all() returns every inserted run."""
         db = self._populated_db()
         assert len(db.all()) == 5
 
     def test_for_tiling_filters(self) -> None:
-        """for_tiling returns only runs for the specified tiling."""
         db = self._populated_db()
         runs = db.for_tiling("kagome")
         assert len(runs) == 2
         assert all(r.tiling_key == "kagome" for r in runs)
 
     def test_for_solver_filters(self) -> None:
-        """for_solver returns only runs for the specified solver."""
         db = self._populated_db()
         runs = db.for_solver("AnnealingSolver")
         assert len(runs) == 1
@@ -366,14 +357,12 @@ class TestSolveRunDB:
         assert runs[0].n_vertices == 24
 
     def test_for_tiling_solver_filters(self) -> None:
-        """for_tiling_solver filters by both tiling and solver."""
         db = self._populated_db()
         runs = db.for_tiling_solver("hexagonal", "GreedySolver")
         assert len(runs) == 3
         assert all(r.tiling_key == "hexagonal" for r in runs)
 
     def test_for_tiling_solver_n_filters(self) -> None:
-        """for_tiling_solver_n filters by tiling, solver, and vertex count."""
         db = self._populated_db()
         runs = db.for_tiling_solver_n("hexagonal", "GreedySolver", 12)
         assert len(runs) == 2
@@ -389,12 +378,10 @@ class TestSolveRunDB:
         assert db.solvers == ["AnnealingSolver", "GreedySolver"]
 
     def test_len(self) -> None:
-        """__len__ returns the total run count."""
         db = self._populated_db()
         assert len(db) == 5
 
     def test_for_supercell_filters(self) -> None:
-        """for_supercell returns only runs with the specified supercell."""
         db = self._populated_db()
         runs = db.for_supercell("(4x3)")
         assert len(runs) == 1

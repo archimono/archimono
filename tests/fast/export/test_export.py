@@ -44,7 +44,6 @@ class TestAssignmentToAtoms:
         assert sum(assignment) == _N_B
 
     def test_species_are_applied(self) -> None:
-        """A different species pair is honoured."""
         tiling = registry.get("kagome")
         assignment = _kagome_assignments()[0]
 
@@ -55,13 +54,11 @@ class TestAssignmentToAtoms:
         assert set(atoms.get_chemical_symbols()) <= {"Mo", "S"}
 
     def test_length_mismatch_raises(self) -> None:
-        """A wrong-length assignment raises ValueError."""
         tiling = registry.get("kagome")
         with pytest.raises(ValueError, match="does not match"):
             assignment_to_atoms(tiling, _SUPERCELL, (0, 1, 0))
 
     def test_non_binary_value_raises(self) -> None:
-        """An assignment with values outside {0, 1} raises ValueError."""
         tiling = registry.get("kagome")
         bad = (2,) + (0,) * 11  # right length, illegal value
         with pytest.raises(ValueError, match="must be binary"):
@@ -90,13 +87,11 @@ class TestExportStructures:
         ]
 
     def test_empty_assignments_raises(self, tmp_path: pathlib.Path) -> None:
-        """An empty assignment list raises ValueError."""
         tiling = registry.get("kagome")
         with pytest.raises(ValueError, match="non-empty"):
             export_structures(tiling, _SUPERCELL, [], outdir=tmp_path)
 
     def test_creates_missing_outdir(self, tmp_path: pathlib.Path) -> None:
-        """A non-existent output directory is created."""
         tiling = registry.get("kagome")
         outdir = tmp_path / "nested" / "out"
 

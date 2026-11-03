@@ -15,9 +15,9 @@ from archimono.tilings import registry
 # Cases where all three backends are tested for agreement.
 # (tiling_key, supercell, n_b)
 _AGREEMENT_CASES = [
-    ("triangular", (2, 2), 2),
+    ("triangular", (3, 3), 2),
     ("kagome", (2, 2), 6),
-    ("kagome", (1, 1), 1),
+    ("kagome", (2, 2), 1),
     ("hexagonal", (2, 2), 4),
 ]
 
@@ -33,7 +33,6 @@ class TestBackendAgreement:
     def test_icet_orderly_burnside_agree(
         self, key: str, supercell: tuple[int, int], n_b: int
     ) -> None:
-        """Three backends produce identical counts."""
         tiling = registry.get(key)
         n = tiling.n_vertices * supercell[0] * supercell[1]
 
@@ -79,7 +78,7 @@ class TestKagome2x2GroundTruth:
         assert len(icet_configs) == 30
 
     def test_near_optimal_window(self) -> None:
-        """Configs within 2 bonds of optimum (min_cut >= 14) = 15."""
+        """Configs within cut value 2 of optimum (min_cut >= 14) = 15."""
         tiling = registry.get("kagome")
         near_opt = IcetEnumerator().enumerate(
             tiling, n_b=6, supercell=(2, 2), min_cut=14

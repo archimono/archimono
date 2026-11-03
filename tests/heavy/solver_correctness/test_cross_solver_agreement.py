@@ -17,13 +17,16 @@ from archimono.assignment import (
 from archimono.assignment.solvers.frontier_dp import FrontierExactSolver
 from archimono.tilings import registry
 
+# triangular, snub_square, and elongated_triangular alias at their previous
+# sizes here (edge instances collapse under PBC -- see Tiling._graph_matrix);
+# bumped to their smallest supported supercells.
 _CASES = [
     ("kagome", (2, 2), 6),
-    ("triangular", (2, 2), 2),
+    ("triangular", (3, 3), 2),
     ("truncated_hexagonal", (1, 1), 3),
     ("rhombitrihexagonal", (1, 1), 3),
-    ("snub_square", (1, 1), 2),
-    ("elongated_triangular", (2, 1), 4),
+    ("snub_square", (2, 2), 2),
+    ("elongated_triangular", (3, 1), 6),
     ("snub_hexagonal", (1, 1), 3),
 ]
 
@@ -36,8 +39,8 @@ _NONBALANCED_CASES = [
     ("truncated_hexagonal", (1, 1), 4),
     ("rhombitrihexagonal", (1, 1), 2),  # n=6
     ("rhombitrihexagonal", (1, 1), 4),
-    ("elongated_triangular", (2, 1), 2),  # n=8
-    ("elongated_triangular", (2, 1), 5),
+    ("elongated_triangular", (3, 1), 4),  # n=12
+    ("elongated_triangular", (3, 1), 8),
     ("snub_hexagonal", (1, 1), 2),  # n=6
     ("snub_hexagonal", (1, 1), 4),
 ]

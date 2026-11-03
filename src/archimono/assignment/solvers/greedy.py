@@ -69,10 +69,6 @@ class GreedySolver(_heuristic_base.HeuristicAssignmentSolver):
             one_nodes: Node indices currently labeled `1`.
             zero_nodes: Node indices currently labeled `0`.
             rng: Random generator used to shuffle tie-order traversal.
-
-        Returns:
-            A tuple describing the best improving swap, or `None` if no
-            improving swap exists.
         """
         one_indices = list(range(len(one_nodes)))
         zero_indices = list(range(len(zero_nodes)))
@@ -195,11 +191,7 @@ class GreedySolver(_heuristic_base.HeuristicAssignmentSolver):
                 labels=tuple(labels),
                 objective_value=cut_value,
                 cut_value=cut_value,
-                n_frustrated=sum(
-                    1
-                    for u, v in graph.edges()
-                    if labels[int(u)] == labels[int(v)]
-                ),
+                n_frustrated=_scoring.count_frustrated_edges(graph, labels),
                 solver=self.__class__.__name__,
                 metadata={
                     "species": tuple(species),

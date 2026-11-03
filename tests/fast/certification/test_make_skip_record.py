@@ -9,7 +9,6 @@ class TestMakeSkipRecord:
     """make_skip_record produces valid skip placeholder records."""
 
     def test_status_is_skip(self) -> None:
-        """Returned record has status='skip'."""
         record = make_skip_record(
             tiling_key="hexagonal",
             tiling_display="6³ (hexagonal)",
@@ -20,7 +19,6 @@ class TestMakeSkipRecord:
         assert record.status == "skip"
 
     def test_runtime_ms_is_zero(self) -> None:
-        """Returned record has runtime_ms=0.0."""
         record = make_skip_record(
             tiling_key="square",
             tiling_display="4⁴ (square)",
@@ -72,7 +70,6 @@ class TestMakeSkipRecord:
         assert record.note == "no valid supercell"
 
     def test_custom_note(self) -> None:
-        """Custom note is stored."""
         record = make_skip_record(
             tiling_key="hexagonal",
             tiling_display="6³ (hexagonal)",
@@ -84,7 +81,6 @@ class TestMakeSkipRecord:
         assert record.note == "custom reason"
 
     def test_returns_certification_record(self) -> None:
-        """Returns a CertificationRecord instance."""
         record = make_skip_record(
             tiling_key="hexagonal",
             tiling_display="6³ (hexagonal)",

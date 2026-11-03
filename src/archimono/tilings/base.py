@@ -33,26 +33,26 @@ class Tiling(abc.ABC):
     lives in a neighbouring cell.
 
     Args:
-        bond_length: Edge length in arbitrary units.  All lattice vectors and
+        edge_length: Edge length in arbitrary units.  All lattice vectors and
             Cartesian node positions scale linearly with this value.  Default
-            ``1.0`` (dimensionless unit bond).  Pass e.g. ``1.42`` for
+            ``1.0`` (dimensionless unit edge).  Pass e.g. ``1.42`` for
             graphene/h-BN (Å) or any other physical or simulation unit.
 
     Raises:
-        ValueError: If *bond_length* is not positive.
+        ValueError: If *edge_length* is not positive.
     """
 
-    def __init__(self, bond_length: float = 1.0) -> None:
-        if bond_length <= 0:
+    def __init__(self, edge_length: float = 1.0) -> None:
+        if edge_length <= 0:
             raise ValueError(
-                f"bond_length must be positive; got {bond_length}."
+                f"edge_length must be positive; got {edge_length}."
             )
-        self._bond_length = float(bond_length)
+        self._edge_length = float(edge_length)
 
     @property
-    def bond_length(self) -> float:
+    def edge_length(self) -> float:
         """Edge length scale; all lattice vectors are proportional to this."""
-        return self._bond_length
+        return self._edge_length
 
     # ------------------------------------------------------------------
     # Abstract interface
@@ -129,7 +129,7 @@ class Tiling(abc.ABC):
                 matrix) whose columns define the supercell lattice vectors in
                 units of the primitive vectors.  The matrix form enables
                 non-rectangular (sheared) supercells that can satisfy PBC
-                constraints at atom counts unreachable by diagonal cells.
+                constraints at node counts unreachable by diagonal cells.
             pbc: If ``True`` (default), periodic boundary conditions are
                 applied and cross-boundary edges wrap around via modular
                 arithmetic.  If ``False``, edges that would cross the
@@ -146,7 +146,7 @@ class Tiling(abc.ABC):
             ValueError: If *supercell* does not have the right shape, contains
                 non-positive diagonal entries (tuple form), has non-positive
                 determinant (matrix form), or produces a degenerate graph
-                (self-loops or bipartiteness loss under PBC).
+                (self-loops, bipartiteness loss, or edge aliasing under PBC).
         """
         # --- Matrix supercell (2D array) path ---
         arr = np.asarray(supercell)
@@ -180,61 +180,13 @@ class Tiling(abc.ABC):
                 f"supercell entries must be positive integers; got "
                 f"({supercell[0]}, {supercell[1]})."
             )
-        n_prim = self.n_vertices
-        a_vec, b_vec = self.lattice_vectors[0], self.lattice_vectors[1]
-
-        g: nx.Graph[int] = nx.Graph()
-        g.graph["tiling_vertex_config"] = self.vertex_config
-        g.graph["tiling_is_bipartite"] = self.is_bipartite
+        # A diagonal (na, nb) supercell builds the same graph as the
+        # equivalent matrix supercell (node-, edge- and attribute-identical;
+        # the sorted cell-point ordering of the matrix builder reproduces the
+        # (ia * nb + ib) * n_prim + v flattening for diagonal matrices). Only
+        # the ``supercell`` metadata keeps the (na, nb) tuple form.
+        g = self._graph_matrix(np.diag([na, nb]).astype(np.intp), pbc=pbc)
         g.graph["supercell"] = (na, nb)
-        g.graph["pbc"] = pbc
-
-        # Add nodes with Cartesian positions.
-        for ia in range(na):
-            for ib in range(nb):
-                for v in range(n_prim):
-                    node_id = _node_index(ia, ib, v, na, nb, n_prim)
-                    frac = self.vertices[v]
-                    cart = (frac[0] + ia) * a_vec + (frac[1] + ib) * b_vec
-                    g.add_node(node_id, pos=cart)
-
-        # Add edges, applying periodic boundary conditions when pbc=True.
-        for ia in range(na):
-            for ib in range(nb):
-                for i, j, da, db in self.edges:
-                    ia2_raw = ia + da
-                    ib2_raw = ib + db
-                    if not pbc:
-                        if not (0 <= ia2_raw < na and 0 <= ib2_raw < nb):
-                            continue
-                        ia2, ib2 = ia2_raw, ib2_raw
-                    else:
-                        ia2 = ia2_raw % na
-                        ib2 = ib2_raw % nb
-                    u = _node_index(ia, ib, i, na, nb, n_prim)
-                    v = _node_index(ia2, ib2, j, na, nb, n_prim)
-                    if u == v:
-                        raise ValueError(
-                            f"Supercell ({na}, {nb}) produces a self-loop via "
-                            f"edge ({i}, {j}, {da}, {db}) in "
-                            f"'{self.vertex_config}'.  Increase the supercell "
-                            f"dimension(s) along the direction(s) where this "
-                            f"edge folds back on itself.  See "
-                            f"docs/reference/tilings.md, "
-                            f"§PBC supercell constraints."
-                        )
-                    g.add_edge(u, v)
-
-        if pbc and self.is_bipartite and not nx.is_bipartite(g):
-            raise ValueError(
-                f"Supercell ({na}, {nb}) produces a non-bipartite graph for "
-                f"declared-bipartite tiling '{self.vertex_config}'.  This is a "
-                f"PBC parity artefact — the supercell folds a cross-cell edge "
-                f"onto two same-sublattice vertices.  See "
-                f"docs/reference/tilings.md, "
-                f"§PBC supercell constraints."
-            )
-
         return g
 
     # ------------------------------------------------------------------
@@ -266,62 +218,15 @@ class Tiling(abc.ABC):
 
         Raises:
             ValueError: On non-positive determinant, lattice-point enumeration
-                mismatch, self-loops, or bipartiteness loss.
+                mismatch, self-loops, bipartiteness loss, or edge aliasing.
         """
-        det = int(s_mat[0, 0]) * int(s_mat[1, 1]) - int(s_mat[0, 1]) * int(s_mat[1, 0])
-        if det <= 0:
-            raise ValueError(
-                f"Supercell matrix {s_mat.tolist()} has non-positive determinant "
-                f"({det}); matrix must have positive determinant."
-            )
-        n_cells = det
-
-        n_prim = self.n_vertices
-        a_vec, b_vec = self.lattice_vectors[0], self.lattice_vectors[1]
-
-        # --- Exact integer inverse via adjugate ---
-        # For a 2×2 matrix S, S⁻¹ = adj(S) / det(S) where
-        # adj([[a,b],[c,d]]) = [[d,-b],[-c,a]].
-        # Using adj(S) @ v (integer) and dividing by det avoids all
-        # floating-point error in fractional-coordinate computations.
-        a0, b0 = int(s_mat[0, 0]), int(s_mat[0, 1])
-        c0, d0 = int(s_mat[1, 0]), int(s_mat[1, 1])
-        # adj(S): rows are [d0, -b0] and [-c0, a0]
-        adj = [[d0, -b0], [-c0, a0]]
-
-        def _frac_exact(px: int, py: int) -> tuple[int, int, int]:
-            """Return (num_x, num_y, den).
-
-            S⁻¹@[px,py] = (num_x/den, num_y/den).
-            """
-            return adj[0][0] * px + adj[0][1] * py, adj[1][0] * px + adj[1][1] * py, det
-
-        # --- Enumerate lattice points inside the supercell ---
-        # Search bound: any lattice point (ia, ib) in the fundamental domain
-        # satisfies |ia| ≤ Σ|S_ij| and |ib| ≤ Σ|S_ij| because S⁻¹·(ia,ib) ∈
-        # [0,1)² implies (ia,ib) is a non-negative combination of S's columns
-        # with coefficients in [0,1).
-        max_coord = int(np.sum(np.abs(s_mat))) + 1
-
-        cell_points: list[tuple[int, int]] = []
-        for ia in range(-max_coord, max_coord):
-            for ib in range(-max_coord, max_coord):
-                nx_, ny_, nd = _frac_exact(ia, ib)
-                # S⁻¹@(ia,ib) ∈ [0,1)²  iff  0 ≤ num < den  (for positive det)
-                if 0 <= nx_ < nd and 0 <= ny_ < nd:
-                    cell_points.append((ia, ib))
-
-        if len(cell_points) != n_cells:
-            raise ValueError(
-                f"Expected {n_cells} lattice points in supercell "
-                f"{s_mat.tolist()} but found {len(cell_points)}."
-            )
-
-        # Deterministic ordering: sort by (ia, ib) so node IDs are stable.
-        cell_points.sort()
+        cell_points = _enumerate_cell_points(s_mat)
         cell_to_idx: dict[tuple[int, int], int] = {
             pt: idx for idx, pt in enumerate(cell_points)
         }
+
+        n_prim = self.n_vertices
+        a_vec, b_vec = self.lattice_vectors[0], self.lattice_vectors[1]
 
         g: nx.Graph[int] = nx.Graph()
         g.graph["tiling_vertex_config"] = self.vertex_config
@@ -338,33 +243,22 @@ class Tiling(abc.ABC):
                 g.add_node(node_id, pos=cart)
 
         # --- Edges ---
+        # This loop makes exactly len(cell_points) * len(self.edges) ==
+        # N * coordination // 2 add-edge attempts (len(self.edges) ==
+        # n_prim * coordination // 2). If none of them hits a self-loop or
+        # an already-existing pair, the final graph has exactly that many
+        # edges -- the physical count. So the has_edge check below fires
+        # iff two distinct periodic edge instances would otherwise silently
+        # collapse onto the same node pair.
         for idx, (ia, ib) in enumerate(cell_points):
             for i, j, da, db in self.edges:
-                px, py = ia + da, ib + db
-                nx_, ny_, nd = _frac_exact(px, py)
-
-                if not pbc:
-                    # Skip edges that would require wrapping.
-                    if not (0 <= nx_ < nd and 0 <= ny_ < nd):
-                        continue
-                    rx, ry = nx_, ny_
-                else:
-                    rx, ry = nx_ % nd, ny_ % nd
-
-                ia2 = (a0 * rx + b0 * ry) // nd
-                ib2 = (c0 * rx + d0 * ry) // nd
+                v_idx = _wrap_matrix_edge(
+                    s_mat, cell_to_idx, ia, ib, da, db, pbc=pbc
+                )
+                if v_idx is None:
+                    continue  # pbc=False: edge crosses the boundary, omit it
 
                 u = idx * n_prim + i
-                try:
-                    v_idx = cell_to_idx[(ia2, ib2)]
-                except KeyError:
-                    raise ValueError(
-                        f"Supercell matrix {s_mat.tolist()} exact wrap-back "
-                        f"produced lattice point ({ia2}, {ib2}) which is not "
-                        f"in the enumerated fundamental domain for "
-                        f"'{self.vertex_config}'. This is a bug — check "
-                        f"_frac_exact or the adjugate/modular reduction."
-                    ) from None
                 v_node = v_idx * n_prim + j
 
                 if u == v_node:
@@ -372,6 +266,19 @@ class Tiling(abc.ABC):
                         f"Supercell matrix {s_mat.tolist()} produces a "
                         f"self-loop via edge ({i}, {j}, {da}, {db}) in "
                         f"'{self.vertex_config}'.  Choose a larger supercell "
+                        f"matrix.  See docs/reference/tilings.md, "
+                        f"§PBC supercell constraints."
+                    )
+                if pbc and g.has_edge(u, v_node):
+                    raise ValueError(
+                        f"Supercell matrix {s_mat.tolist()} aliases multiple "
+                        f"physical edge instances onto the same node pair "
+                        f"({u}, {v_node}) in '{self.vertex_config}' via edge "
+                        f"({i}, {j}, {da}, {db}).  This is a PBC wraparound "
+                        f"artefact — the supercell is too small for this "
+                        f"tiling's connectivity, so distinct periodic edge "
+                        f"instances fold onto the same node pair (one would "
+                        f"be silently dropped).  Choose a larger supercell "
                         f"matrix.  See docs/reference/tilings.md, "
                         f"§PBC supercell constraints."
                     )
@@ -395,9 +302,172 @@ class Tiling(abc.ABC):
 # ------------------------------------------------------------------
 
 
-def _node_index(ia: int, ib: int, v: int, na: int, nb: int, n_prim: int) -> int:
-    """Flatten a (cell_a, cell_b, vertex) triple to a single node index."""
-    return (ia * nb + ib) * n_prim + v
+def _matrix_frac_exact(
+    s_mat: NDArray[np.intp], px: int, py: int
+) -> tuple[int, int, int]:
+    """Return exact-integer fractional coordinates of a lattice point.
+
+    For a 2×2 matrix ``S``, ``S⁻¹ = adj(S) / det(S)`` where
+    ``adj([[a,b],[c,d]]) = [[d,-b],[-c,a]]``.  Using ``adj(S) @ v`` (integer)
+    and dividing by ``det`` avoids all floating-point error.
+
+    Returns:
+        ``(num_x, num_y, den)`` such that ``S⁻¹@[px,py] = (num_x/den,
+        num_y/den)``.
+    """
+    a, b = int(s_mat[0, 0]), int(s_mat[0, 1])
+    c, d = int(s_mat[1, 0]), int(s_mat[1, 1])
+    det = a * d - b * c
+    return d * px - b * py, -c * px + a * py, det
+
+
+def _enumerate_cell_points(s_mat: NDArray[np.intp]) -> list[tuple[int, int]]:
+    """Enumerate the fundamental-domain lattice points of a supercell matrix.
+
+    Returns:
+        A sorted list of ``(ia, ib)`` lattice points, one per supercell copy.
+
+    Raises:
+        ValueError: If the determinant is non-positive, or if the number of
+            enumerated points doesn't match ``det(s_mat)`` (indicates a bug
+            in the enumeration bound, not a user input error).
+    """
+    det = int(s_mat[0, 0]) * int(s_mat[1, 1]) - int(s_mat[0, 1]) * int(s_mat[1, 0])
+    if det <= 0:
+        raise ValueError(
+            f"Supercell matrix {s_mat.tolist()} has non-positive determinant "
+            f"({det}); matrix must have positive determinant."
+        )
+
+    # Search bound: any lattice point (ia, ib) in the fundamental domain
+    # satisfies |ia| ≤ Σ|S_ij| and |ib| ≤ Σ|S_ij| because S⁻¹·(ia,ib) ∈
+    # [0,1)² implies (ia,ib) is a non-negative combination of S's columns
+    # with coefficients in [0,1).
+    max_coord = int(np.sum(np.abs(s_mat))) + 1
+
+    cell_points: list[tuple[int, int]] = []
+    for ia in range(-max_coord, max_coord):
+        for ib in range(-max_coord, max_coord):
+            nx_, ny_, nd = _matrix_frac_exact(s_mat, ia, ib)
+            # S⁻¹@(ia,ib) ∈ [0,1)²  iff  0 ≤ num < den  (for positive det)
+            if 0 <= nx_ < nd and 0 <= ny_ < nd:
+                cell_points.append((ia, ib))
+
+    if len(cell_points) != det:
+        raise ValueError(
+            f"Expected {det} lattice points in supercell "
+            f"{s_mat.tolist()} but found {len(cell_points)}."
+        )
+
+    # Deterministic ordering: sort by (ia, ib) so node IDs are stable.
+    cell_points.sort()
+    return cell_points
+
+
+def _wrap_matrix_edge(
+    s_mat: NDArray[np.intp],
+    cell_to_idx: dict[tuple[int, int], int],
+    ia: int,
+    ib: int,
+    da: int,
+    db: int,
+    *,
+    pbc: bool,
+) -> int | None:
+    """Return the target cell index for one periodic edge template instance.
+
+    Args:
+        s_mat: The supercell matrix.
+        cell_to_idx: Mapping from fundamental-domain lattice point to cell
+            index, as built from :func:`_enumerate_cell_points`.
+        ia: Starting cell's first lattice coordinate.
+        ib: Starting cell's second lattice coordinate.
+        da: Edge template's first lattice offset.
+        db: Edge template's second lattice offset.
+        pbc: If ``True``, wrap an out-of-domain target back into the
+            fundamental domain via modular arithmetic.  If ``False``,
+            return ``None`` for edges that would cross the supercell
+            boundary.
+
+    Returns:
+        The target cell's index into *cell_to_idx*, or ``None`` if *pbc* is
+        ``False`` and this edge template would cross the supercell boundary.
+
+    Raises:
+        ValueError: If exact wrap-back produces a lattice point outside the
+            enumerated fundamental domain -- indicates a bug in the
+            adjugate or modular-reduction arithmetic, not a user input error.
+    """
+    a0, b0 = int(s_mat[0, 0]), int(s_mat[0, 1])
+    c0, d0 = int(s_mat[1, 0]), int(s_mat[1, 1])
+    px, py = ia + da, ib + db
+    nx_, ny_, nd = _matrix_frac_exact(s_mat, px, py)
+
+    if not pbc:
+        if not (0 <= nx_ < nd and 0 <= ny_ < nd):
+            return None
+        rx, ry = nx_, ny_
+    else:
+        rx, ry = nx_ % nd, ny_ % nd
+
+    ia2 = (a0 * rx + b0 * ry) // nd
+    ib2 = (c0 * rx + d0 * ry) // nd
+    try:
+        return cell_to_idx[(ia2, ib2)]
+    except KeyError:
+        raise ValueError(
+            f"Supercell matrix {s_mat.tolist()} exact wrap-back produced "
+            f"lattice point ({ia2}, {ib2}) which is not in the enumerated "
+            f"fundamental domain. This is a bug — check _matrix_frac_exact "
+            f"or the adjugate/modular reduction."
+        ) from None
+
+
+def _canonical_edge(u: int, v: int) -> tuple[int, int]:
+    """Return ``(u, v)`` ordered so that either generation order compares equal."""
+    return (u, v) if u < v else (v, u)
+
+
+def _matrix_has_edge_aliasing(
+    tiling: Tiling,
+    s_mat: NDArray[np.intp],
+    cell_points: Sequence[tuple[int, int]],
+    cell_to_idx: dict[tuple[int, int], int],
+) -> bool:
+    """Return True if any two periodic edge instances collide under *s_mat*.
+
+    Simulates the edge-wrapping loop from :meth:`Tiling._graph_matrix`
+    without building node positions or a :class:`networkx.Graph`, tracking
+    each wrapped node pair canonically (see :func:`_canonical_edge`) so that
+    a collision generated once as ``(u, v)`` and once as ``(v, u)`` is still
+    detected.  Self-loops are excluded here since they are already covered
+    by the dedicated self-loop check in :func:`_matrix_supercell_is_valid`.
+
+    Args:
+        tiling: The tiling whose edge templates are being tested.
+        s_mat: A 2×2 integer supercell matrix with positive determinant.
+        cell_points: Fundamental-domain lattice points, from
+            :func:`_enumerate_cell_points`.
+        cell_to_idx: Mapping from lattice point to cell index, matching
+            *cell_points*.
+    """
+    n_prim = tiling.n_vertices
+    seen: set[tuple[int, int]] = set()
+    for idx, (ia, ib) in enumerate(cell_points):
+        for i, j, da, db in tiling.edges:
+            v_idx = _wrap_matrix_edge(s_mat, cell_to_idx, ia, ib, da, db, pbc=True)
+            assert v_idx is not None  # pbc=True never returns None
+
+            u = idx * n_prim + i
+            v_node = v_idx * n_prim + j
+            if u == v_node:
+                continue
+
+            pair = _canonical_edge(u, v_node)
+            if pair in seen:
+                return True
+            seen.add(pair)
+    return False
 
 
 def _sublattice_parities(tiling: Tiling) -> tuple[int, int]:
@@ -410,9 +480,6 @@ def _sublattice_parities(tiling: Tiling) -> tuple[int, int]:
 
     Non-bipartite tilings always return ``(0, 0)`` because the parity check
     is not applicable to them.
-
-    Args:
-        tiling: Any tiling in the registry.
 
     Returns:
         A pair ``(p_a, p_b)`` where each value is 0 or 1.
@@ -435,9 +502,14 @@ def _matrix_supercell_is_valid(
 ) -> bool:
     """Return True iff *s_mat* is a valid supercell matrix for *tiling*.
 
-    Analytically equivalent to checking whether ``tiling.graph(s_mat)``
-    raises :class:`ValueError`, but without building the graph.  The two
-    failure modes are:
+    Equivalent to checking whether ``tiling.graph(s_mat)`` raises
+    :class:`ValueError`, without building a :class:`networkx.Graph` or node
+    positions.  The self-loop and bipartite-parity checks are analytic
+    (O(1) / O(len(tiling.edges))) and run first as a cheap early exit; the
+    edge-aliasing check runs last, only if both pass, since it is no longer
+    analytic -- it simulates the periodic wrap for every edge instance, the
+    same O(n_cells * len(tiling.edges)) cost as graph construction itself.
+    The three failure modes are:
 
     - **Self-loop**: for a same-vertex edge ``(i, i, da, db)``, the
       displacement ``[da, db]`` is in the supercell lattice, i.e.,
@@ -446,6 +518,9 @@ def _matrix_supercell_is_valid(
       one column of *s_mat* has an odd dot-product with the sublattice parity
       vector ``(p_a, p_b)``, causing a cross-cell edge to connect two
       same-sublattice vertices.
+    - **Edge aliasing**: two distinct periodic edge instances wrap onto the
+      same node pair under *s_mat* (see :func:`_matrix_has_edge_aliasing`),
+      which would silently collapse in the constructed graph.
 
     Args:
         tiling: The tiling to validate against.
@@ -455,9 +530,6 @@ def _matrix_supercell_is_valid(
             computed on demand.  Pass a precomputed value when calling this
             function in a tight loop over many candidate matrices for the
             same tiling.
-
-    Returns:
-        ``True`` if *s_mat* passes both checks; ``False`` if either fails.
     """
     s_inv = np.linalg.inv(s_mat.astype(np.float64))
 
@@ -482,6 +554,13 @@ def _matrix_supercell_is_valid(
                 if (p_a * int(col[0]) + p_b * int(col[1])) % 2 != 0:
                     return False
 
+    # Edge-aliasing check: simulate the periodic wrap for every edge
+    # instance and look for two that collide onto the same node pair.
+    cell_points = _enumerate_cell_points(s_mat)
+    cell_to_idx = {pt: idx for idx, pt in enumerate(cell_points)}
+    if _matrix_has_edge_aliasing(tiling, s_mat, cell_points, cell_to_idx):
+        return False
+
     return True
 
 
@@ -489,23 +568,19 @@ def min_valid_supercell_matrix(
     tiling: Tiling,
     target_n: int,
 ) -> NDArray[np.intp] | None:
-    """Find a valid supercell matrix for *tiling* at *target_n* atoms.
+    """Find a valid supercell matrix for *tiling* at *target_n* nodes.
 
     Searches all 2×2 Hermite Normal Form (HNF) matrices whose determinant
     equals ``target_n / n_prim``.  Diagonal matrices (no shear) are tried
     first, sorted by aspect ratio; shear matrices follow, sorted by
-    condition number.  Validity is checked analytically via
-    :func:`_matrix_supercell_is_valid` without building the graph.  Returns
-    the first valid matrix, or ``None`` if no valid supercell exists at the
-    requested size.
+    condition number.  Validity is checked via
+    :func:`_matrix_supercell_is_valid`, without building a full graph.
+    Returns the first valid matrix, or ``None`` if no valid supercell
+    exists at the requested size.
 
     This is useful for tilings like 4.8² (truncated square) whose PBC
-    constraints prevent all diagonal supercells at certain atom counts;
+    constraints prevent all diagonal supercells at certain node counts;
     a shear matrix can sometimes satisfy the constraints instead.
-
-    Args:
-        tiling: The tiling to build a supercell for.
-        target_n: Desired number of atoms in the supercell.
 
     Returns:
         A 2×2 integer numpy array, or ``None`` if *target_n* is not a
@@ -519,17 +594,13 @@ def valid_supercell_matrices(
     tiling: Tiling,
     target_n: int,
 ) -> list[NDArray[np.intp]]:
-    """Return all valid HNF supercell matrices for *tiling* at *target_n* atoms.
+    """Return all valid HNF supercell matrices for *tiling* at *target_n* nodes.
 
     Searches all 2×2 Hermite Normal Form (HNF) matrices whose determinant
     equals ``target_n / n_prim``. Diagonal matrices (no shear) are ordered
     first, sorted by aspect ratio; shear matrices follow, sorted by condition
     number. Every matrix for which :func:`_matrix_supercell_is_valid` returns
     ``True`` is returned.
-
-    Args:
-        tiling: The tiling to build supercells for.
-        target_n: Desired number of atoms in the supercell.
 
     Returns:
         A list of valid 2×2 integer numpy arrays. The list is empty if
@@ -546,7 +617,7 @@ def valid_supercell_matrices(
         if k % a != 0:
             continue
         d = k // a
-        for b in range(d):
+        for b in range(a):
             candidates.append(np.array([[a, b], [0, d]], dtype=np.intp))
 
     def _sort_key(s: NDArray[np.intp]) -> tuple[int, float]:
@@ -565,3 +636,27 @@ def valid_supercell_matrices(
             valid.append(s)
 
     return valid
+
+
+def parse_supercell(text: str) -> tuple[int, int]:
+    """Parse a diagonal supercell string into an ``(na, nb)`` tuple.
+
+    Accepts ``"AxB"`` (case-insensitive) or ``"A,B"`` forms, such as ``"4x6"``
+    or ``"2,2"``.
+
+    Raises:
+        ValueError: If ``text`` does not contain exactly two integer fields.
+    """
+    lowered = text.lower()
+    if "x" in lowered:
+        parts = lowered.split("x")
+    elif "," in text:
+        parts = text.split(",")
+    else:
+        raise ValueError(
+            f"supercell must be 'AxB' or 'A,B'; got {text!r}."
+        )
+    if len(parts) != 2:
+        raise ValueError(f"supercell must have exactly two fields; got {text!r}.")
+    return int(parts[0]), int(parts[1])
+

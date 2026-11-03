@@ -1,27 +1,20 @@
-"""Consolidated verification and visualisation entry-point for archimono.
+"""Reusable verification and visualisation workflows for ``archimono verify``.
 
-Runs one or more verification modes via ``--mode``:
+The ``archimono verify`` command runs one or more verification modes:
 
 * ``geometry``     — geometry checks + PNG per tiling + overview grid
-                     (migrated from ``verify_tilings.py``)
 * ``exact-solver`` — BruteforceSolver against hardcoded reference cases + PNGs
-                     (migrated from ``verify_exact_solver.py``)
 * ``visualize``    — solve all 11 tilings and render PNGs
-                     (migrated from ``visualize_kagome.py``)
-* ``all``          — run all three in sequence (default)
-
-Usage::
-
-    python scripts/verify.py [--mode {geometry,exact-solver,visualize,all}]
-                              [--out-dir DIR]
+* ``all``          — run all three in sequence
 """
 
 from __future__ import annotations
 
-import argparse
+import contextlib
+import dataclasses
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING, TypeAlias, TypedDict
+from typing import TYPE_CHECKING, Literal, TextIO, TypeAlias, TypedDict, get_args
 
 import matplotlib
 
@@ -45,6 +38,8 @@ from archimono.viz import (
     supercell_positions,
 )
 
+VerificationMode: TypeAlias = Literal["geometry", "exact-solver", "visualize", "all"]
+
 # Type aliases used in exact-solver and visualize modes.
 if TYPE_CHECKING:
     _RenderedCase: TypeAlias = (
@@ -62,11 +57,61 @@ _VisResult: TypeAlias = tuple[
     int,
 ]
 
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class VerificationConfig:
+    """Configuration for a verification workflow run.
+
+    Attributes:
+        mode: Verification mode to run.
+        out_dir: Directory where PNG artifacts are written.
+        output: Optional text stream for progress output. When ``None``,
+            progress is written to standard output.
+    """
+
+    mode: VerificationMode
+    out_dir: Path
+    output: TextIO | None = None
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class VerificationResult:
+    """Result summary for a verification workflow run.
+
+    Attributes:
+        mode: Verification mode that was requested.
+        out_dir: Directory where PNG artifacts were written.
+        geometry_ok: Boolean result for geometry mode, or ``None`` when it was
+            not selected.
+        exact_solver_ok: Boolean result for exact-solver mode, or ``None`` when
+            it was not selected.
+        visualize_ok: Boolean result for visualization mode, or ``None`` when
+            it was not selected.
+    """
+
+    mode: VerificationMode
+    out_dir: Path
+    geometry_ok: bool | None = None
+    exact_solver_ok: bool | None = None
+    visualize_ok: bool | None = None
+
+    @property
+    def ok(self) -> bool:
+        """Return whether every selected verification mode succeeded."""
+        return all(
+            value is not False
+            for value in (
+                self.geometry_ok,
+                self.exact_solver_ok,
+                self.visualize_ok,
+            )
+        )
+
 # ---------------------------------------------------------------------------
 # geometry mode — constants
 # ---------------------------------------------------------------------------
 
-# (n_prim_verts, coord, is_bipartite, bond_Å)
+# (n_prim_verts, coord, is_bipartite, edge_Å)
 _EXPECTED: dict[str, tuple[int, int, bool, float]] = {
     "4⁴":        (2,  4, True,  1.80),
     "6³":        (2,  3, True,  1.42),
@@ -123,10 +168,10 @@ _CASES: dict[str, _CaseSpec] = {
         "expected_frustrated": 0,
     },
     "triangular": {
-        "supercell": (2, 2),
+        "supercell": (3, 3),
         "n_b": 2,
-        "expected_cut": 4.0,
-        "expected_frustrated": 2,
+        "expected_cut": 12.0,
+        "expected_frustrated": 15,
     },
     "kagome": {
         "supercell": (2, 2),
@@ -153,9 +198,9 @@ _TILINGS: list[tuple[str, str, tuple[int, int]]] = [
     ("truncated_square",       "4.8² — Truncated Square",       (2, 2)),
     ("truncated_trihexagonal", "4.6.12 — Omnitruncated Trihex", (2, 2)),
     ("kagome",                 "3.6.3.6 — Kagome",              (2, 2)),
-    ("triangular",             "3⁶ — Triangular",               (2, 2)),
+    ("triangular",             "3⁶ — Triangular",               (3, 3)),
     ("truncated_hexagonal",    "3.12² — Truncated Hexagonal",   (2, 2)),
-    ("elongated_triangular",   "3³.4² — Elongated Triangular",  (2, 2)),
+    ("elongated_triangular",   "3³.4² — Elongated Triangular",  (3, 1)),
     ("rhombitrihexagonal",     "3.4.6.4 — Rhombitrihex.",       (2, 2)),
     ("snub_square",            "3².4.3.4 — Snub Square",        (2, 2)),
     ("snub_hexagonal",         "3⁴.6 — Snub Hexagonal",        (2, 2)),
@@ -170,25 +215,22 @@ _VIS_SOLVER = AnnealingSolver(n_restarts=50, seed=42)
 
 def _real_edges(
     g: nx.Graph[int],
-    bond: float,
+    edge_length: float,
     tol_frac: float = 0.12,
 ) -> list[tuple[int, int]]:
-    """Return only edges whose Euclidean length is approximately *bond*.
+    """Return only edges whose Euclidean length is approximately *edge_length*.
 
     Wrap-around PBC edges are excluded because their Cartesian length
-    differs from the physical bond length.
+    differs from the physical edge length.
 
     Args:
         g: NetworkX graph with ``pos`` node attributes.
-        bond: Expected bond length in Å.
-        tol_frac: Fractional tolerance applied symmetrically around *bond*.
-
-    Returns:
-        List of ``(u, v)`` edge tuples whose length lies within the
-        tolerance band.
+        edge_length: Expected edge length in Å.
+        tol_frac: Fractional tolerance applied symmetrically around
+            *edge_length*.
     """
-    hi = bond * (1.0 + tol_frac)
-    lo = bond * (1.0 - tol_frac)
+    hi = edge_length * (1.0 + tol_frac)
+    lo = edge_length * (1.0 - tol_frac)
     out: list[tuple[int, int]] = []
     for u, v in g.edges():
         pu = np.array(g.nodes[u]["pos"], dtype=float)
@@ -199,21 +241,17 @@ def _real_edges(
     return out
 
 
-def _check_bond_lengths(
+def _check_edge_lengths(
     g: nx.Graph[int],
-    bond: float,
+    edge_length: float,
 ) -> tuple[bool, float, float]:
-    """Return ``(ok, min_length, max_length)`` for real bonds in *g*.
+    """Return ``(ok, min_length, max_length)`` for real edges in *g*.
 
     Args:
         g: NetworkX graph with ``pos`` node attributes.
-        bond: Expected bond length in Å.
-
-    Returns:
-        Tuple of a boolean pass/fail flag and the observed min and max
-        bond lengths.
+        edge_length: Expected edge length in Å.
     """
-    real = _real_edges(g, bond)
+    real = _real_edges(g, edge_length)
     if not real:
         return False, 0.0, 0.0
     lengths = [
@@ -226,8 +264,8 @@ def _check_bond_lengths(
         for u, v in real
     ]
     lo, hi = min(lengths), max(lengths)
-    tol = 0.05 * bond
-    ok = abs(lo - bond) < tol and abs(hi - bond) < tol
+    tol = 0.05 * edge_length
+    ok = abs(lo - edge_length) < tol and abs(hi - edge_length) < tol
     return ok, lo, hi
 
 
@@ -235,11 +273,11 @@ def _render_pbc_tiling(
     ax: matplotlib.axes.Axes,
     tiling: Tiling,
     supercell: tuple[int, int],
-    bond: float,
+    edge_length: float,
     *,
     color: str,
     atom_size: float = 40.0,
-    bond_width: float = 1.4,
+    edge_width: float = 1.4,
     cell_lw: float = 1.4,
     ghost_alpha: float = 0.42,
 ) -> None:
@@ -253,10 +291,10 @@ def _render_pbc_tiling(
         ax: Matplotlib axes to draw on.
         tiling: Tiling instance providing geometry.
         supercell: ``(na, nb)`` supercell dimensions.
-        bond: Expected bond length in Å (used for view padding).
+        edge_length: Expected edge length in Å (used for view padding).
         color: Atom fill colour.
         atom_size: Scatter marker area in points².
-        bond_width: Bond line width in points.
+        edge_width: Edge line width in points.
         cell_lw: Supercell outline line width.
         ghost_alpha: Opacity of ghost atoms in image cells.
     """
@@ -288,14 +326,14 @@ def _render_pbc_tiling(
         pv = pos[v] + img_a * super_a + img_b * super_b
         ax.plot(
             [pu[0], pv[0]], [pu[1], pv[1]],
-            color="#666666", linewidth=bond_width, alpha=0.85,
+            color="#666666", linewidth=edge_width, alpha=0.85,
             solid_capstyle="round", zorder=3,
         )
         if (img_a, img_b) != (0, 0):
             pu2 = pos[u] - img_a * super_a - img_b * super_b
             ax.plot(
                 [pu2[0], pos[v][0]], [pu2[1], pos[v][1]],
-                color="#666666", linewidth=bond_width, alpha=0.85,
+                color="#666666", linewidth=edge_width, alpha=0.85,
                 solid_capstyle="round", zorder=3,
             )
 
@@ -312,7 +350,7 @@ def _render_pbc_tiling(
                 linewidth=cell_lw, linestyle="-")
     )
 
-    pad = 2.5 * bond
+    pad = 2.5 * edge_length
     all_corners = np.array([np.zeros(2), super_a, super_a + super_b, super_b])
     xmin, ymin = (all_corners.min(axis=0) - pad).tolist()
     xmax, ymax = (all_corners.max(axis=0) + pad).tolist()
@@ -336,7 +374,7 @@ def _run_geometry_checks(
     tiling: Tiling,
     g_vis: nx.Graph[int],
     g_bp: nx.Graph[int],
-) -> tuple[list[str], int | None]:
+) -> list[str]:
     """Run geometry verification checks for one tiling.
 
     Args:
@@ -346,15 +384,10 @@ def _run_geometry_checks(
         g_bp: Even supercell graph used for bipartite check.
 
     Returns:
-        Tuple of ``(errors, coord)``: the list of error strings (empty means
-        all checks passed) and the tiling's coordination number, or ``None``
-        if computing it raised ``ValueError``. Returning the cached value lets
-        callers display it without re-invoking ``tiling.coordination`` (whose
-        re-raise would otherwise escape an unguarded call site).
+        List of error strings; empty means all checks passed.
     """
-    exp_n_prim, exp_coord, exp_bip, exp_bond = _EXPECTED[key]
+    exp_n_prim, exp_coord, exp_bip, exp_edge_length = _EXPECTED[key]
     errors: list[str] = []
-    coord: int | None = None
 
     if tiling.n_vertices != exp_n_prim:
         errors.append(
@@ -380,11 +413,11 @@ def _run_geometry_checks(
             f"conflicts with declared is_bipartite={tiling.is_bipartite}"
         )
 
-    bond_ok, lo, hi = _check_bond_lengths(g_vis, exp_bond)
-    if not bond_ok:
+    edges_ok, lo, hi = _check_edge_lengths(g_vis, exp_edge_length)
+    if not edges_ok:
         errors.append(
-            f"bond lengths not uniform: min={lo:.4f} Å, max={hi:.4f} Å "
-            f"(expected {exp_bond:.2f} Å ± 5%)"
+            f"edge lengths not uniform: min={lo:.4f} Å, max={hi:.4f} Å "
+            f"(expected {exp_edge_length:.2f} Å ± 5%)"
         )
 
     exp_ec = exp_n_prim * exp_coord // 2
@@ -395,17 +428,17 @@ def _run_geometry_checks(
             f"expected {exp_n_prim}×{exp_coord}÷2 = {exp_ec}"
         )
 
-    real = _real_edges(g_vis, exp_bond)
+    real = _real_edges(g_vis, exp_edge_length)
     if not real:
-        errors.append("no real bonds found in the visualisation supercell")
+        errors.append("no real edges found in the visualisation supercell")
     else:
         h = g_vis.edge_subgraph(real).copy()
         if not nx.is_connected(h):
             errors.append(
-                "real-bond subgraph of the visualisation supercell is disconnected"
+                "real-edge subgraph of the visualisation supercell is disconnected"
             )
 
-    return errors, coord
+    return errors
 
 
 # ---------------------------------------------------------------------------
@@ -414,14 +447,7 @@ def _run_geometry_checks(
 
 
 def _safe_name(vertex_config: str) -> str:
-    """Return a filesystem-safe stem for a tiling name.
-
-    Args:
-        vertex_config: Tiling registry key or name.
-
-    Returns:
-        String with non-alphanumeric runs replaced by underscores.
-    """
+    """Return *vertex_config* with non-alphanumeric runs replaced by underscores."""
     return re.sub(r"[^0-9A-Za-z]+", "_", vertex_config).strip("_")
 
 
@@ -432,11 +458,6 @@ def _run_exact_case(
     out_dir: Path,
 ) -> tuple[Tiling, nx.Graph[int], tuple[int, ...], list[str], Path]:
     """Solve, validate, and render one documented brute-force reference case.
-
-    Args:
-        tiling_name: Key in ``_CASES``.
-        solver: BruteforceSolver instance to use.
-        out_dir: Directory where the PNG is saved.
 
     Returns:
         Tuple of ``(tiling, graph, labels, errors, out_path)``.
@@ -503,14 +524,6 @@ def _solve_tiling(
 
     Bipartite tilings are solved with :class:`BipartiteAssigner`; frustrated
     tilings use :data:`_VIS_SOLVER`.
-
-    Args:
-        name: Registry key for the tiling.
-        supercell: ``(na, nb)`` supercell dimensions.
-
-    Returns:
-        Tuple of the tiling instance, integer labels, cut value, and the
-        number of frustrated bonds.
     """
     tiling = registry.get(name)
     n = len(tiling.vertices) * supercell[0] * supercell[1]
@@ -535,12 +548,6 @@ def _render_vis_single(
     out_dir: Path,
 ) -> tuple[Tiling, tuple[int, ...], float, int, Path]:
     """Render and save one tiling assignment figure.
-
-    Args:
-        name: Registry key for the tiling.
-        title: Human-readable label shown as the figure title.
-        supercell: ``(na, nb)`` supercell dimensions.
-        out_dir: Directory where the PNG is saved.
 
     Returns:
         Tuple of ``(tiling, labels, cut_value, n_frustrated, out_path)``.
@@ -581,17 +588,11 @@ def _render_vis_single(
 def run_geometry(out_dir: Path) -> bool:
     """Verify geometry of all 11 Archimedean tilings and render PNGs.
 
-    Saves one PNG per tiling and an overview grid to *out_dir*.
-
-    Args:
-        out_dir: Directory where output images are written.
-
-    Returns:
-        ``True`` if all checks pass, ``False`` otherwise.
+    Saves one PNG per tiling and an overview grid to *out_dir*. Returns ``True``
+    if all checks pass.
     """
     all_keys = sorted(_EXPECTED.keys())
     all_errors: dict[str, list[str]] = {}
-    all_coords: dict[str, int | None] = {}
     overall_pass = True
 
     print(f"\n{'─' * 72}")
@@ -599,22 +600,21 @@ def run_geometry(out_dir: Path) -> bool:
     print(f"{'─' * 72}\n")
 
     for key in all_keys:
+        edge_length = _EXPECTED[key][3]
         try:
-            tiling = registry.get(key, bond_length=_EXPECTED[key][3])
+            tiling = registry.get(key, edge_length=edge_length)
         except KeyError as exc:
             print(f"  [SKIP] {key}: not found in registry ({exc})")
             overall_pass = False
             continue
 
-        bond = _EXPECTED[key][3]
         sc_vis = _VIS_SC[key]
         sc_bp = _BPCHECK_SC[key]
         g_vis = tiling.graph(sc_vis)
         g_bp = tiling.graph(sc_bp)
 
-        errors, coord = _run_geometry_checks(key, tiling, g_vis, g_bp)
+        errors = _run_geometry_checks(key, tiling, g_vis, g_bp)
         all_errors[key] = errors
-        all_coords[key] = coord
 
         safe = (
             key
@@ -624,11 +624,16 @@ def run_geometry(out_dir: Path) -> bool:
         out_path = out_dir / f"{safe}.png"
         fig, ax = plt.subplots(figsize=(6, 6))
         _render_pbc_tiling(
-            ax, tiling, sc_vis, bond, color=_COLORS[tiling.is_bipartite]
+            ax, tiling, sc_vis, edge_length, color=_COLORS[tiling.is_bipartite]
         )
         fig.tight_layout(pad=0.2)
         fig.savefig(out_path, dpi=150, bbox_inches="tight")
         plt.close(fig)
+
+        try:
+            coord: str | int = tiling.coordination
+        except ValueError:
+            coord = "?"
 
         if errors:
             overall_pass = False
@@ -636,7 +641,7 @@ def run_geometry(out_dir: Path) -> bool:
         status = "PASS" if not errors else "FAIL"
         print(
             f"  {icon} [{status}]  {key:<14}  "
-            f"n_prim={tiling.n_vertices}  coord={coord if coord is not None else '?'}"
+            f"n_prim={tiling.n_vertices}  coord={coord}"
             f"  bip={tiling.is_bipartite}  |  {out_path.name}"
         )
         for err in errors:
@@ -650,17 +655,16 @@ def run_geometry(out_dir: Path) -> bool:
     for idx, key in enumerate(all_keys):
         ax = axes.flat[idx]
         try:
-            tiling = registry.get(key, bond_length=_EXPECTED[key][3])
-            bond = _EXPECTED[key][3]
+            edge_length = _EXPECTED[key][3]
+            tiling = registry.get(key, edge_length=edge_length)
             _render_pbc_tiling(
-                ax, tiling, _VIS_SC[key], bond,
+                ax, tiling, _VIS_SC[key], edge_length,
                 color=_COLORS[tiling.is_bipartite],
-                atom_size=22, bond_width=1.0, cell_lw=1.1,
+                atom_size=22, edge_width=1.0, cell_lw=1.1,
             )
             errs = all_errors.get(key, [])
-            z = all_coords.get(key)
             ax.set_title(
-                f"{key}  z={z if z is not None else '?'}\n"
+                f"{key}  z={tiling.coordination}\n"
                 f"{'✓ PASS' if not errs else '✗ FAIL: ' + errs[0][:40]}",
                 fontsize=8,
                 color="black" if not errs else "red",
@@ -701,13 +705,8 @@ def run_geometry(out_dir: Path) -> bool:
 def run_exact_solver(out_dir: Path) -> bool:
     """Verify BruteforceSolver against hardcoded reference cases.
 
-    Saves one PNG per case and an overview grid to *out_dir*.
-
-    Args:
-        out_dir: Directory where output images are written.
-
-    Returns:
-        ``True`` if all checks pass, ``False`` otherwise.
+    Saves one PNG per case and an overview grid to *out_dir*. Returns ``True``
+    if all checks pass.
     """
     solver = BruteforceSolver()
     rendered_cases: list[_RenderedCase] = []
@@ -796,9 +795,6 @@ def run_visualize(out_dir: Path) -> None:
     """Solve all 11 tilings and render PNG assignments.
 
     Saves one PNG per tiling and an overview grid to *out_dir*.
-
-    Args:
-        out_dir: Directory where output images are written.
     """
     print(f"\n{'─' * 72}")
     print("  Visualising all 11 Archimedean tilings")
@@ -862,69 +858,55 @@ def run_visualize(out_dir: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# CLI
+# Workflow runner
 # ---------------------------------------------------------------------------
 
 
-def _parse_args() -> argparse.Namespace:
-    """Parse command-line arguments.
+def run_verification(config: VerificationConfig) -> VerificationResult:
+    """Run the requested verification workflow.
 
-    Returns:
-        Parsed :class:`argparse.Namespace` with ``mode`` and ``out_dir``.
+    Raises:
+        ValueError: If ``config.mode`` is not a supported verification mode.
     """
-    parser = argparse.ArgumentParser(
-        description="Verification and visualisation for archimono.",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=(
-            "Modes:\n"
-            "  geometry      Geometry checks + PNG per tiling + overview grid\n"
-            "  exact-solver  BruteforceSolver against reference cases + PNGs\n"
-            "  visualize     Solve all 11 tilings and render assignment PNGs\n"
-            "  all           Run all three modes in sequence (default)\n"
-        ),
-    )
-    parser.add_argument(
-        "--mode",
-        choices=["geometry", "exact-solver", "visualize", "all"],
-        default="all",
-        help="Verification mode to run (default: all).",
-    )
-    parser.add_argument(
-        "--out-dir",
-        type=Path,
-        default=Path("tmp") / "verify",
-        help="Output directory for PNG images (default: tmp/verify/).",
-    )
-    return parser.parse_args()
+    valid_modes = get_args(VerificationMode)
+    if config.mode not in valid_modes:
+        raise ValueError(
+            f"unknown verification mode: {config.mode!r}. "
+            f"Expected one of {valid_modes}."
+        )
+
+    if config.output is None:
+        return _run_verification(config.mode, config.out_dir)
+
+    with contextlib.redirect_stdout(config.output):
+        return _run_verification(config.mode, config.out_dir)
 
 
-def main() -> int:
-    """Run the selected verification mode(s).
-
-    Reads ``--mode`` and ``--out-dir`` from the command line, creates the
-    output directory if needed, then delegates to the appropriate runner(s).
-
-    Returns:
-        Process exit code: ``0`` if selected verification modes pass, else ``1``.
-    """
-    args = _parse_args()
-    out_dir: Path = args.out_dir
+def _run_verification(
+    mode: VerificationMode,
+    out_dir: Path,
+) -> VerificationResult:
+    """Run selected verification modes after public input validation."""
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    mode: str = args.mode
-    ok = True
+    geometry_ok: bool | None = None
+    exact_solver_ok: bool | None = None
+    visualize_ok: bool | None = None
 
     if mode in ("geometry", "all"):
-        ok = run_geometry(out_dir) and ok
+        geometry_ok = run_geometry(out_dir)
 
     if mode in ("exact-solver", "all"):
-        ok = run_exact_solver(out_dir) and ok
+        exact_solver_ok = run_exact_solver(out_dir)
 
     if mode in ("visualize", "all"):
         run_visualize(out_dir)
+        visualize_ok = True
 
-    return 0 if ok else 1
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
+    return VerificationResult(
+        mode=mode,
+        out_dir=out_dir,
+        geometry_ok=geometry_ok,
+        exact_solver_ok=exact_solver_ok,
+        visualize_ok=visualize_ok,
+    )

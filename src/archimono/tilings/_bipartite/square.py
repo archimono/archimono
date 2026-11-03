@@ -3,7 +3,7 @@
 Each vertex borders four squares.
 Primitive cell: 2 vertices.  Coordination number: 4.  Bipartite.
 Lattice: square (a = b, γ = 90°).
-Bond length is parameterised via ``Tiling.bond_length`` (default 1.0).
+Edge length is parameterised via ``Tiling.edge_length`` (default 1.0).
 """
 
 from __future__ import annotations
@@ -25,10 +25,10 @@ class SquareTiling(Tiling):
 
     @property
     def lattice_vectors(self) -> NDArray[np.float64]:
-        # To fit 2 atoms (bipartite checkerboard) while maintaining exact bond lengths,
+        # To fit 2 vertices (bipartite checkerboard) while keeping exact edge lengths,
         # the square unit cell spans the diagonal of the individual squares.
-        # Therefore, a = bond * √2
-        a = self.bond_length * np.sqrt(2.0)
+        # Therefore, a = edge * √2
+        a = self.edge_length * np.sqrt(2.0)
         return np.array(
             [
                 [a, 0.0],

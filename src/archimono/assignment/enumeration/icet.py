@@ -49,6 +49,7 @@ from archimono.assignment.enumeration._helpers import (
     _tiling_to_atoms,
     assignment_to_atoms,
 )
+from archimono.assignment.enumeration.burnside import MAX_RAW_CONFIGURATIONS
 
 if TYPE_CHECKING:
     from archimono.tilings.base import SupercellLike, Tiling
@@ -104,7 +105,7 @@ class IcetEnumerator:
 
         Args:
             tiling: The Archimedean tiling to enumerate on.
-            n_b: Number of label-1 atoms (= species[1]).  Must satisfy
+            n_b: Number of label-1 sites (= species[1]).  Must satisfy
                 ``1 <= n_b < n``.
             supercell: ``(na, nb)`` tuple or 2×2 integer matrix supercell
                 (matching :meth:`Tiling.graph`).  The supercell atoms are
@@ -112,7 +113,7 @@ class IcetEnumerator:
             min_cut: Include only configurations with cut value
                 >= *min_cut*.  Set to
                 ``solver_result.cut_value - tolerance`` to restrict
-                to structures within *tolerance* bonds of the
+                to structures within *tolerance* cut-value units of the
                 optimum.
             override: If ``True``, skip the combinatorial-explosion
                 safety check.  Use only when you have confirmed the
@@ -127,8 +128,8 @@ class IcetEnumerator:
 
         Raises:
             ValueError: If *supercell* produces a degenerate graph
-                (self-loop or PBC parity violation), if *n_b* is
-                out of range, or if the raw enumeration space
+                (self-loop, PBC parity violation, or edge aliasing), if
+                *n_b* is out of range, or if the raw enumeration space
                 C(n, n_b) exceeds 10 million without
                 ``override=True``.
             RuntimeError: If icet's ``enumerate_structures`` returns
@@ -150,14 +151,14 @@ class IcetEnumerator:
         if not (1 <= n_b < n):
             raise ValueError(f"n_b={n_b} out of valid range [1, {n - 1}] for n={n}.")
 
-        _MAX_RAW = 10_000_000
         n_choose_nb = math.comb(n, n_b)
-        if not override and n_choose_nb > _MAX_RAW:
+        if not override and n_choose_nb > MAX_RAW_CONFIGURATIONS:
             raise ValueError(
                 f"Raw enumeration space C({n}, {n_b}) = {n_choose_nb:,} exceeds "
-                f"the {_MAX_RAW:,}-structure safety limit.  This will likely "
-                f"exhaust memory or run indefinitely.  Pass override=True only "
-                f"if you have confirmed the enumeration is tractable."
+                f"the {MAX_RAW_CONFIGURATIONS:,}-structure safety limit.  This "
+                f"will likely exhaust memory or run indefinitely.  Pass "
+                f"override=True only if you have confirmed the enumeration "
+                f"is tractable."
             )
 
         conc = n_b / n
@@ -216,17 +217,6 @@ class IcetEnumerator:
     ) -> Atoms:
         """Convert a binary assignment to an ASE Atoms structure.
 
-        Args:
-            tiling: The Archimedean tiling the assignment was generated for.
-            supercell: ``(na, nb)`` tuple or 2×2 integer matrix supercell used
-                during enumeration.
-            assignment: A binary tuple of length *n*
-                (0 = ``species[0]``, 1 = ``species[1]``).
-            species: Pair of ASE-valid element symbols.
-
-        Returns:
-            An ASE Atoms object with the species assigned.
-
         Raises:
             ValueError: If ``len(assignment)`` does not match the supercell
                 atom count.
@@ -243,14 +233,6 @@ class IcetEnumerator:
         Uses spglib directly (the same backend as icet) to extract site
         permutations for the tiling supercell.  Useful for computing
         Burnside counts independently of the icet enumeration.
-
-        Args:
-            tiling: Target tiling.
-            supercell: ``(na, nb)`` supercell dimensions.
-
-        Returns:
-            Unique permutation tuples representing the space-group
-            symmetry.
         """
         atoms = _tiling_to_atoms(tiling, supercell)
         return _get_symmetry_permutations(atoms)

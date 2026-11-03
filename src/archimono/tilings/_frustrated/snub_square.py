@@ -3,7 +3,7 @@
 Each vertex borders two pairs of triangles and one square, in alternation.
 Primitive cell: 4 vertices.  Coordination number: 5.  Non-bipartite.
 Lattice: square (a = b, γ = 90°).
-Bond length is parameterised via ``Tiling.bond_length`` (default 1.0).
+Edge length is parameterised via ``Tiling.edge_length`` (default 1.0).
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ from archimono.tilings.base import Tiling
 from archimono.tilings.registry import register
 
 # For the exact 2D snub square tiling with regular polygons,
-# the lattice parameter is precisely derived as a = bond * √(2 + √3).
+# the lattice parameter is precisely derived as a = edge * √(2 + √3).
 _S = np.sqrt(3.0)
 _SCALE = np.sqrt(2.0 + _S)
 
@@ -30,7 +30,7 @@ class SnubSquareTiling(Tiling):
 
     @property
     def lattice_vectors(self) -> NDArray[np.float64]:
-        a = self.bond_length * _SCALE
+        a = self.edge_length * _SCALE
         # Square Bravais lattice.
         return np.array(
             [
@@ -45,8 +45,8 @@ class SnubSquareTiling(Tiling):
         # 4 vertices per primitive cell.
         # The square is rotated by exactly 15° relative to the lattice.
         # (Standard square at 45° + 15° rotation = 60° starting angle).
-        # The circumradius of a square with side bond_length is bond_length / √2
-        r = self.bond_length / np.sqrt(2.0)
+        # The circumradius of a square with side edge_length is edge_length / √2
+        r = self.edge_length / np.sqrt(2.0)
         angles = np.radians(np.array([60.0, 150.0, 240.0, 330.0]))
 
         cart = np.array(
@@ -67,7 +67,7 @@ class SnubSquareTiling(Tiling):
 
         edges: list[tuple[int, int, int, int]] = []
         seen: set[tuple[int, int, int, int]] = set()
-        tol = 0.15 * self.bond_length
+        tol = 0.15 * self.edge_length
 
         # Dynamically loop over all 4 vertices to map the coordination of 5
         for i in range(len(frac)):
@@ -77,7 +77,7 @@ class SnubSquareTiling(Tiling):
                         continue
                     shifted = frac[j] + np.array([da, db])
                     dist = float(np.linalg.norm((shifted - frac[i]) @ L))
-                    if abs(dist - self.bond_length) < tol:
+                    if abs(dist - self.edge_length) < tol:
                         key = (i, j, da, db)
                         rev = (j, i, -da, -db)
                         if key not in seen and rev not in seen:

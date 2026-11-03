@@ -30,6 +30,8 @@ accel = [
     "numba>=0.60",
 ]
 dev = [
+    "setuptools>=77",
+    "wheel",
     "icet>=2.1",
     "ruff>=0.4",
     "mypy>=1.9",
@@ -48,6 +50,9 @@ Homepage = "https://github.com/archimono/archimono"
 Repository = "https://github.com/archimono/archimono"
 Documentation = "https://archimono.github.io/archimono/"
 
+[project.scripts]
+archimono = "archimono.cli.__main__:main"
+
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["archimono*"]
@@ -63,6 +68,14 @@ select = ["E", "F", "W", "I", "UP", "ANN"]
 strict = true
 mypy_path = "src"
 
+# numba ships an incomplete ``py.typed`` (0.65): submodules like ``numba.typed``
+# resolve, but ``njit``/``prange``/``get_num_threads`` are untyped. Treat the
+# whole package as untyped so the JIT kernels in ``_jit`` type-check cleanly.
+[[tool.mypy.overrides]]
+module = ["numba.*"]
+follow_imports = "skip"
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
@@ -71,7 +84,7 @@ filterwarnings = [
 ]
 addopts = "-m 'not heavy'"
 markers = [
-    "fast: inner dev loop (< 10s total)",
-    "contract: pre-commit gate (< 3 min)",
-    "heavy: full robustness, CI or manual (< 10 min)",
+    "fast: unit-level checks on small graphs, run while editing",
+    "contract: integration checks on CLI and multi-tiling behaviour, run before each commit",
+    "heavy: large-supercell and exhaustive checks, run before each pull request",
 ]

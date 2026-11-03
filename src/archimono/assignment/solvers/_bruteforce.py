@@ -8,7 +8,7 @@ from itertools import combinations
 
 import networkx as nx
 
-from archimono.assignment.solvers import _jit, _scoring, base
+from archimono.assignment.solvers import _combinatorics, _jit, _scoring, base
 
 _TOLERANCE: float = 1e-9
 
@@ -60,40 +60,39 @@ def _solve_python(
     return best_cut, best_labels, optimal_labels, best_count
 
 
-def _solve_jit_two_pass(
+def _solve_jit(
     edges: list[base.AssignmentEdge],
     n_nodes: int,
     n_ones: int,
-    total_states: int,  # noqa: ARG001
 ) -> tuple[float, base.AssignmentLabels | None, list[base.AssignmentLabels], int]:
-    """Two-pass JIT-accelerated enumeration.
+    """Single-pass JIT enumeration via the shared parallel kernel.
 
-    Pass 1 (JIT): find the optimal cut value over all C(n, n_ones) states.
-    Pass 2 (Python + JIT scoring): collect labels for states at the optimum.
+    Delegates to :func:`_jit.collect_parallel_best_and_ties`, which finds the
+    optimal cut and every tying rank in one parallel scan; only the optima are
+    unranked here. This shares the single tie definition
+    (:data:`_jit._TIE_TOLERANCE`) with the in-process and sliced parallel
+    solvers, so all three agree on which assignments are optimal -- no separate
+    serial rescan and no second tolerance constant.
     """
-    import numpy as np
-
+    total_states = math.comb(n_nodes, n_ones)
     src, dst, wt = _jit.edges_to_arrays(edges)
-    best_cut = float(_jit.bruteforce_maxcut_jit(n_nodes, n_ones, src, dst, wt))
+    binom = _combinatorics.binomial_table(n_nodes)
+    best_cut, tie_ranks = _jit.collect_parallel_best_and_ties(
+        0, total_states, n_nodes, n_ones, binom, src, dst, wt
+    )
 
     best_labels: base.AssignmentLabels | None = None
     optimal_labels: list[base.AssignmentLabels] = []
-    best_count = 0
-    labels_buf = np.zeros(n_nodes, dtype=np.int64)
+    for rank in tie_ranks:
+        one_nodes = _combinatorics.unrank_combination(int(rank), n_nodes, n_ones)
+        labels_tuple = tuple(
+            labels_from_one_nodes(n_nodes=n_nodes, one_nodes=one_nodes)
+        )
+        optimal_labels.append(labels_tuple)
+        if best_labels is None or labels_tuple < best_labels:
+            best_labels = labels_tuple
 
-    for one_nodes in combinations(range(n_nodes), n_ones):
-        labels_buf[:] = 0
-        for node in one_nodes:
-            labels_buf[node] = 1
-        cut_value = float(_jit.maxcut_value_jit(labels_buf, src, dst, wt))
-        if math.isclose(cut_value, best_cut, rel_tol=0.0, abs_tol=_TOLERANCE):
-            labels_tuple = tuple(int(x) for x in labels_buf)
-            best_count += 1
-            optimal_labels.append(labels_tuple)
-            if best_labels is None or labels_tuple < best_labels:
-                best_labels = labels_tuple
-
-    return best_cut, best_labels, optimal_labels, best_count
+    return float(best_cut), best_labels, optimal_labels, len(optimal_labels)
 
 
 def solve_fixed_composition(
@@ -124,6 +123,9 @@ def solve_fixed_composition(
     Raises:
         ValueError: If ``target_composition`` is inconsistent with ``graph``.
         RuntimeError: If no candidate assignments are evaluated.
+        OverflowError: If numba is available and ``graph.number_of_nodes()``
+            exceeds the signed ``int64`` rank-space limit (``n >= 67``); see
+            :func:`archimono.assignment.solvers._combinatorics.binomial_table`.
     """
     n_nodes = graph.number_of_nodes()
     n_zeros, n_ones = target_composition
@@ -136,7 +138,7 @@ def solve_fixed_composition(
 
     if _jit.HAS_NUMBA and progress_callback is None:
         best_cut, best_labels, optimal_labels, best_count = (
-            _solve_jit_two_pass(edges, n_nodes, n_ones, total_states)
+            _solve_jit(edges, n_nodes, n_ones)
         )
     else:
         best_cut, best_labels, optimal_labels, best_count = (
@@ -162,15 +164,7 @@ def labels_from_one_nodes(
     n_nodes: int,
     one_nodes: tuple[int, ...],
 ) -> list[int]:
-    """Build dense binary labels from the selected ``1``-label nodes.
-
-    Args:
-        n_nodes: Total number of graph nodes.
-        one_nodes: Node indices that should receive label ``1``.
-
-    Returns:
-        Dense ``0/1`` labels indexed by node id.
-    """
+    """Build dense ``0/1`` labels, indexed by node id, from the ``1``-label nodes."""
     labels = [0] * n_nodes
     for node in one_nodes:
         labels[node] = 1

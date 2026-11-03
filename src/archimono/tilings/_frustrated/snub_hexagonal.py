@@ -3,7 +3,7 @@
 Each vertex borders four triangles and one hexagon.
 Primitive cell: 6 vertices.  Coordination number: 5.  Non-bipartite.
 Lattice: hexagonal (a = b, γ = 60°).
-Bond length is parameterised via ``Tiling.bond_length`` (default 1.0).
+Edge length is parameterised via ``Tiling.edge_length`` (default 1.0).
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ class SnubHexagonalTiling(Tiling):
 
     @property
     def lattice_vectors(self) -> NDArray[np.float64]:
-        a = self.bond_length * np.sqrt(7.0)
+        a = self.edge_length * np.sqrt(7.0)
         return np.array(
             [
                 [a, 0.0],
@@ -39,8 +39,8 @@ class SnubHexagonalTiling(Tiling):
     @property
     def vertices(self) -> NDArray[np.float64]:
         # Rotation angle θ such that a hexagon vertex at (cos θ, sin θ)
-        # is at bond distance from the nearest vertex in the (1, 0) neighbouring
-        # cell (lattice parameter a = bond × √7).
+        # is at edge distance from the nearest vertex in the (1, 0) neighbouring
+        # cell (lattice parameter a = edge × √7).
         # Constraint: |[√7, 0] − 2(cos θ, sin θ)|² = 1
         # Expanding: 7 − 4√7 cos θ + 4 = 1  →  cos θ = 5/(2√7)
         # Therefore θ = arctan(√3 / 5).
@@ -52,7 +52,7 @@ class SnubHexagonalTiling(Tiling):
         # Generate Cartesian coordinates (centered at origin)
         cart = np.array(
             [
-                [self.bond_length * np.cos(a), self.bond_length * np.sin(a)]
+                [self.edge_length * np.cos(a), self.edge_length * np.sin(a)]
                 for a in angles_hex
             ],
             dtype=np.float64,
@@ -70,7 +70,7 @@ class SnubHexagonalTiling(Tiling):
         offsets = [(da, db) for da in (-1, 0, 1) for db in (-1, 0, 1)]
         edges: list[tuple[int, int, int, int]] = []
         seen: set[tuple[int, int, int, int]] = set()
-        tol = 0.15 * self.bond_length
+        tol = 0.15 * self.edge_length
 
         # Dynamically loop over all 6 vertices to find the coordination of 5
         for i in range(len(frac)):
@@ -80,7 +80,7 @@ class SnubHexagonalTiling(Tiling):
                         continue
                     shifted = frac[j] + np.array([da, db])
                     dist = float(np.linalg.norm((shifted - frac[i]) @ L))
-                    if abs(dist - self.bond_length) < tol:
+                    if abs(dist - self.edge_length) < tol:
                         key = (i, j, da, db)
                         rev = (j, i, -da, -db)
                         if key not in seen and rev not in seen:

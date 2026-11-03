@@ -3,7 +3,7 @@
 Each vertex borders two triangles and two hexagons.
 Primitive cell: 3 vertices.  Coordination number: 4.  Non-bipartite.
 Lattice: hexagonal (a = b, γ = 60°).
-Bond length is parameterised via ``Tiling.bond_length`` (default 1.0).
+Edge length is parameterised via ``Tiling.edge_length`` (default 1.0).
 """
 
 from __future__ import annotations
@@ -25,8 +25,8 @@ class KagomeTiling(Tiling):
 
     @property
     def lattice_vectors(self) -> NDArray[np.float64]:
-        # Kagome has the same hexagonal lattice as honeycomb but a = 2*bond.
-        a = 2.0 * self.bond_length
+        # Kagome has the same hexagonal lattice as honeycomb but a = 2*edge.
+        a = 2.0 * self.edge_length
         return np.array(
             [
                 [a, 0.0],
@@ -54,7 +54,7 @@ class KagomeTiling(Tiling):
             (1, 2, 0, 0),
 
             # Cross-cell edges completing the coordination:
-            # Corrected: v0 to v1 in cell (1, -1) maintains exact _BOND distance
+            # Corrected: v0 to v1 in cell (1, -1) maintains exact edge distance
             (0, 1, 1, -1),
             (0, 2, 0, -1),
             (1, 2, -1, 0),

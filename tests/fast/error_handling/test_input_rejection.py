@@ -26,7 +26,6 @@ class TestSolverRejectsInvalidInputs:
         ids=["bruteforce", "annealing", "greedy", "frontier_dp"],
     )
     def test_rejects_empty_graph(self, solver_cls: type) -> None:
-        """Solver raises ValueError on empty graph."""
         graph: nx.Graph[int] = nx.Graph()
         with pytest.raises(ValueError, match="at least one node"):
             solver_cls().solve(graph, ["A", "B"])
@@ -40,7 +39,6 @@ class TestSolverRejectsInvalidInputs:
     def test_rejects_non_binary_species(
         self, solver_cls: type, species: list[str]
     ) -> None:
-        """Solver raises ValueError on non-binary species list."""
         graph = nx.path_graph(4)
         with pytest.raises(ValueError, match="two species"):
             solver_cls().solve(graph, species)
@@ -48,12 +46,10 @@ class TestSolverRejectsInvalidInputs:
     def test_hadlock_rejects_non_planar(
         self, petersen_graph: nx.Graph[int]
     ) -> None:
-        """HadlockSolver raises ValueError on non-planar graph."""
         with pytest.raises(ValueError, match="planar"):
             HadlockSolver().solve(petersen_graph, ["A", "B"])
 
     def test_hadlock_rejects_disconnected(self) -> None:
-        """HadlockSolver raises ValueError on disconnected graph."""
         g: nx.Graph[int] = nx.Graph()
         g.add_edges_from([(0, 1), (2, 3)])
         with pytest.raises(ValueError, match="connected"):
@@ -80,7 +76,6 @@ class TestSolverRejectsInvalidInputs:
             HadlockSolver().solve(g, ["A", "B"])
 
     def test_hadlock_rejects_nb(self, c4_graph: nx.Graph[int]) -> None:
-        """HadlockSolver raises ValueError when n_b is passed."""
         with pytest.raises(ValueError, match="does not accept"):
             HadlockSolver().solve(c4_graph, ["A", "B"], n_b=2)
 

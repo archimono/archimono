@@ -14,18 +14,15 @@ class TestResolveTargetSizes:
         assert result == [4, 6, 12]
 
     def test_none_uses_defaults_filtered_by_max_n(self) -> None:
-        """None uses defaults, filtered to <= max_n."""
         result = resolve_target_sizes(None, default=[4, 8, 12, 16], max_n=12)
         assert result == [4, 8, 12]
 
     def test_none_full_defaults_when_max_n_large(self) -> None:
-        """None with large max_n returns all defaults."""
         defaults = [4, 8, 12]
         result = resolve_target_sizes(None, default=defaults, max_n=100)
         assert result == [4, 8, 12]
 
     def test_non_positive_filtered_from_explicit(self) -> None:
-        """Zero and negative values in explicit list are filtered out."""
         result = resolve_target_sizes([0, -1, 4, 8], default=[], max_n=20)
         assert result == [4, 8]
 
@@ -40,17 +37,14 @@ class TestResolveTargetSizes:
         assert result == []
 
     def test_none_defaults_empty_returns_empty(self) -> None:
-        """None with empty defaults returns empty."""
         result = resolve_target_sizes(None, default=[], max_n=20)
         assert result == []
 
     def test_explicit_deduplication(self) -> None:
-        """Duplicate values in explicit list are deduplicated."""
         result = resolve_target_sizes([4, 4, 8], default=[], max_n=20)
         assert result == [4, 8]
 
     def test_none_filters_and_deduplicates_defaults(self) -> None:
-        """None filters non-positive defaults and deduplicates survivors."""
         result = resolve_target_sizes(
             None,
             default=[0, -4, 4, 4, 8, 12],

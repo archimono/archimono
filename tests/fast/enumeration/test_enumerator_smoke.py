@@ -15,24 +15,22 @@ class TestEnumeratorReturnTypes:
     """Enumerators return lists of valid type on minimal inputs."""
 
     def test_icet_returns_list(self) -> None:
-        """IcetEnumerator.enumerate() returns a list."""
         tiling = registry.get("triangular")
-        configs = IcetEnumerator().enumerate(tiling, n_b=2, supercell=(2, 2))
+        configs = IcetEnumerator().enumerate(tiling, n_b=2, supercell=(3, 3))
         assert isinstance(configs, list)
         assert len(configs) > 0
 
     def test_orderly_returns_list(self) -> None:
-        """OrderlyEnumerator.enumerate() returns a list."""
         tiling = registry.get("triangular")
-        configs = OrderlyEnumerator().enumerate(tiling, n_b=2, supercell=(2, 2))
+        configs = OrderlyEnumerator().enumerate(tiling, n_b=2, supercell=(3, 3))
         assert isinstance(configs, list)
         assert len(configs) > 0
 
     def test_burnside_returns_int(self) -> None:
         """BurnsideCounter.count() returns a positive integer."""
         tiling = registry.get("triangular")
-        group = IcetEnumerator().get_symmetry_group(tiling, supercell=(2, 2))
-        n = tiling.n_vertices * 2 * 2
+        group = IcetEnumerator().get_symmetry_group(tiling, supercell=(3, 3))
+        n = tiling.n_vertices * 3 * 3
         count = BurnsideCounter.count(n, 2, group)
         assert isinstance(count, int)
         assert count > 0
@@ -41,10 +39,9 @@ class TestEnumeratorReturnTypes:
 class TestEnumeratorConsistency:
     """Quick sanity: all backends agree on a tiny case."""
 
-    def test_triangular_2x2_nb2_all_agree(self) -> None:
-        """All three backends produce the same count on triangular 2x2 n_b=2."""
+    def test_triangular_3x3_nb2_all_agree(self) -> None:
         tiling = registry.get("triangular")
-        supercell = (2, 2)
+        supercell = (3, 3)
         n_b = 2
         n = tiling.n_vertices * supercell[0] * supercell[1]
 

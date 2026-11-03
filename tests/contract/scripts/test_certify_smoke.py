@@ -1,4 +1,4 @@
-"""Contract smoke tests for scripts/certify.py.
+"""Contract smoke tests for the certify CLI command.
 
 Runs each --solver backend on hexagonal n=12 and verifies that at least
 one JSON file is written and loadable via archimono.certification.load_case_json.
@@ -18,24 +18,22 @@ from archimono.certification import load_case_json
 @pytest.mark.contract
 @pytest.mark.parametrize(
     "solver",
-    ["bruteforce", "frontier-dp", "frontier-dp-value", "annealing"],
+    ["bruteforce", "frontier-dp-value", "annealing"],
 )
 def test_certify_smoke(solver: str, tmp_path: pathlib.Path) -> None:
-    """Run certify.py with each solver backend on a minimal case.
+    """Run the certify command with each solver backend on a minimal case.
 
-    Invokes ``scripts/certify.py --solver {solver} --tilings hexagonal
+    Invokes ``python -m archimono.cli certify --solver {solver} --tilings hexagonal
     --target-sizes 12 --json-out-dir {tmp_path}`` and checks that at
     least one JSON file is written and can be loaded without error.
-
-    Args:
-        solver: The ``--solver`` value to test.
-        tmp_path: Pytest-provided temporary directory for JSON output.
     """
-    script = pathlib.Path(__file__).parents[3] / "scripts" / "certify.py"
+    markdown_out = tmp_path / f"{solver}.md"
     result = subprocess.run(
         [
             sys.executable,
-            str(script),
+            "-m",
+            "archimono.cli",
+            "certify",
             "--solver",
             solver,
             "--tilings",
@@ -44,6 +42,8 @@ def test_certify_smoke(solver: str, tmp_path: pathlib.Path) -> None:
             "12",
             "--json-out-dir",
             str(tmp_path),
+            "--markdown-out",
+            str(markdown_out),
         ],
         capture_output=True,
         text=True,
@@ -58,6 +58,11 @@ def test_certify_smoke(solver: str, tmp_path: pathlib.Path) -> None:
     json_files = list(tmp_path.glob("*.json"))
     assert json_files, (
         f"No JSON files written to {tmp_path} for --solver {solver}.\n"
+        f"stdout:\n{result.stdout}\n"
+        f"stderr:\n{result.stderr}"
+    )
+    assert markdown_out.exists(), (
+        f"Markdown output not found at {markdown_out} for --solver {solver}.\n"
         f"stdout:\n{result.stdout}\n"
         f"stderr:\n{result.stderr}"
     )

@@ -65,3 +65,15 @@ Structure export
 
 .. automodule:: archimono.export
    :members:
+
+Workflows
+---------
+
+.. automodule:: archimono.workflows.solve
+   :members:
+
+.. automodule:: archimono.workflows.enumerate
+   :members:
+
+.. automodule:: archimono.workflows.certify
+   :members:

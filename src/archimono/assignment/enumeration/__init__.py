@@ -9,7 +9,6 @@ Usage::
 """
 
 from archimono.assignment.enumeration._helpers import (
-    _get_symmetry_permutations,
     _tiling_to_atoms,
     assignment_to_atoms,
 )
@@ -40,13 +39,6 @@ def get(backend: str = DEFAULT_BACKEND) -> OrderlyEnumerator | IcetEnumerator:
     icet-based :class:`~archimono.assignment.enumeration.icet.IcetEnumerator`
     instead. Mirrors :func:`archimono.tilings.registry.get`.
 
-    Args:
-        backend: Backend name, one of ``"orderly"`` or ``"icet"``.
-            Defaults to ``"orderly"`` (:data:`DEFAULT_BACKEND`).
-
-    Returns:
-        A freshly constructed enumerator instance for *backend*.
-
     Raises:
         KeyError: If *backend* is not a recognised backend name.
     """
@@ -65,5 +57,4 @@ __all__ = [
     "assignment_to_atoms",
     "get",
     "tiling_to_atoms",
-    "_get_symmetry_permutations",
 ]
