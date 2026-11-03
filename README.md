@@ -1,4 +1,6 @@
-# archimono
+<h1 align="center">
+  <img src="docs/figures/archimono-banner.png" alt="archimono" width="100%">
+</h1>
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Docs](https://img.shields.io/badge/docs-online-blue.svg)](https://archimono.github.io/archimono/)
@@ -102,8 +104,8 @@ mypy src/
 pytest
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the test tiers, code style, and
-pull request checks. LLM agents also follow [CLAUDE.md](CLAUDE.md).
+Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) before
+opening an issue or pull request.
 
 ## Citation
 
