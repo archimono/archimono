@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Test & type-check caches
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Sphinx build
+docs/_build/
+
+# Script scratch output
+tmp/
+
+# Editors / IDE
+.idea/
+*.iml
+.vscode/
+.claude/
+
+# macOS
+.DS_Store
