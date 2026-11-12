@@ -25,7 +25,6 @@ authors:
     family-names: Fujii
     affiliation: Nara Institute of Science and Technology
 version: 0.1.0
-date-released: "2026-06-20"
 license: MIT
 repository-code: "https://github.com/archimono/archimono"
 url: "https://archimono.github.io/archimono/"
