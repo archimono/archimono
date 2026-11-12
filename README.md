@@ -6,6 +6,7 @@
 [![Docs](https://img.shields.io/badge/docs-online-blue.svg)](https://archimono.github.io/archimono/)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![Status: under development](https://img.shields.io/badge/status-under%20development-orange.svg)](#)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.24141645.svg)](https://doi.org/10.5281/zenodo.24141645)
 
 > **Status: under active development.** This is an early, calibration-stage tool; the API, defaults, and reported values may change.
 
